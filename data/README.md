@@ -1,0 +1,32 @@
+# Benchmark data
+
+Benchmark instances are **not** stored in this repository. Download them
+yourself into `data/raw/`, which is git-ignored. Never commit benchmark files;
+their licences and terms of use belong to the sites that host them.
+
+| Collection        | Contents                                  | Where to get it                      |
+|-------------------|-------------------------------------------|--------------------------------------|
+| Netlib LP         | classic LP test problems (MPS)            | https://www.netlib.org/lp/data/      |
+| MIPLIB 2017       | mixed-integer instances (MPS, often .gz)  | https://miplib.zib.de/               |
+| Maros-Meszaros    | convex QP test set (QPS)                  | the data page of I. Maros (Imperial College London); search for "Maros Meszaros QP test set" |
+| QPLIB             | quadratic programming library             | https://qplib.zib.de/                |
+
+Notes:
+
+- Many Netlib files are distributed in a compressed form that needs the
+  `emps` expander published alongside them; decompress them to plain MPS
+  before use.
+- MIPLIB instances are `.mps.gz`. Reading them directly needs a build with
+  `-DSHODHAN_ENABLE_ZLIB=ON`; otherwise decompress them first.
+- QPS files (Maros-Meszaros, QPLIB) contain quadratic sections that SHODHAN
+  does not read yet; they are rejected with a clear error.
+- These locations are given from memory and were not re-checked when this file
+  was written; verify them against the hosting sites.
+
+Example:
+
+```sh
+mkdir -p data/raw/netlib
+# download an instance (for example afiro.mps) into data/raw/netlib/
+shodhan info data/raw/netlib/afiro.mps
+```
