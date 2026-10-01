@@ -40,7 +40,7 @@ set(SHODHAN_CORE_SOURCES
   src/util/status.cpp
 )
 file(GLOB SHODHAN_OPTIONAL_CORE_SOURCES CONFIGURE_DEPENDS
-  src/util/*.cpp src/model/*.cpp src/io/*.cpp)
+  src/util/*.cpp src/model/*.cpp src/io/*.cpp src/scaling/*.cpp src/presolve/*.cpp)
 list(APPEND SHODHAN_CORE_SOURCES ${SHODHAN_OPTIONAL_CORE_SOURCES})
 list(REMOVE_DUPLICATES SHODHAN_CORE_SOURCES)
 
@@ -63,7 +63,9 @@ endif()
 
 if(SHODHAN_BUILD_TESTS)
   enable_testing()
-  file(GLOB SHODHAN_TEST_SOURCES CONFIGURE_DEPENDS tests/*.cpp)
+  # tests/support holds test-only code (reference solver, generators); it is
+  # compiled into the test executable only, never into shodhan_core.
+  file(GLOB SHODHAN_TEST_SOURCES CONFIGURE_DEPENDS tests/*.cpp tests/support/*.cpp)
   add_executable(shodhan_tests ${SHODHAN_TEST_SOURCES})
   target_link_libraries(shodhan_tests PRIVATE shodhan_core)
   target_include_directories(shodhan_tests PRIVATE tests src)
