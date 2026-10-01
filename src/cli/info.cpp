@@ -5,6 +5,7 @@
 #include <string>
 
 #include "shodhan/model_stats.hpp"
+#include "shodhan/scaling.hpp"
 
 namespace shodhan::cli {
 
@@ -41,6 +42,18 @@ void print_model_summary(const LpModel& model, const std::vector<std::string>& w
   out << "Coefficients:   " << range_text(s.coefficient);
   if (s.coefficient.valid) out << ", ratio " << sci(s.coefficient_ratio);
   out << "\n";
+  {
+    // One-line scaling-quality indicator: the coefficient ratio before and after scaling.
+    ScalingReport rep;
+    compute_scaling(model, {}, &rep);
+    out << "Scaling:        ";
+    if (rep.before.valid) {
+      out << "coefficient ratio " << sci(rep.before.ratio) << " -> " << sci(rep.after.ratio)
+          << " after scaling\n";
+    } else {
+      out << "n/a (no nonzeros)\n";
+    }
+  }
   out << "Costs:          " << range_text(s.cost) << "\n";
   out << "Bounds:         " << range_text(s.bound) << " (finite, nonzero)\n";
   if (model.objective_offset != 0.0) {
