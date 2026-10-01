@@ -7,7 +7,10 @@ numerical library:
   1. CMakeLists.txt and other CMake files (comments are ignored),
   2. #include directives in src/ and include/,
   3. the shared libraries linked by built binaries (via ldd or otool -L when
-     one of them is available).
+     one of them is available),
+  4. test-only code (tests/support/) leaking into the library: src/ and include/
+     must not include it, the CMake definitions of shodhan_core and of the CLI
+     must not mention tests/, and the built library must not contain test objects.
 
 Usage:
   python scripts/check_deps.py [--build-dir DIR] [--verbose]
@@ -131,6 +134,84 @@ def check_includes(verbose, problems):
                             % (rel, lineno, name, m.group(1)))
 
 
+SUPPORT_RE = re.compile(r"support/|dense_ref_lp|random_lp|test_harness|test_models")
+
+
+def cmake_call_text(text, start_pattern):
+    """Text of the first CMake call that starts with start_pattern (up to its closing paren)."""
+    m = re.search(start_pattern, text)
+    if not m:
+        return ""
+    depth = 0
+    for i in range(m.start(), len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[m.start():i + 1]
+    return text[m.start():]
+
+
+def check_test_support_isolation(build_dirs, verbose, problems):
+    # (a) library and CLI sources must not include test-only headers.
+    exts = (".h", ".hpp", ".hh", ".hxx", ".cpp", ".cc", ".cxx")
+    for path in sorted(walk("src", "include")):
+        if not path.endswith(exts):
+            continue
+        rel = os.path.relpath(path, ROOT)
+        if verbose:
+            print("checking test-support isolation: " + rel)
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for lineno, line in enumerate(f, 1):
+                m = INCLUDE_RE.match(line)
+                if m and SUPPORT_RE.search(m.group(1)):
+                    problems.append("%s:%d: library code includes test-only code (%s)"
+                                    % (rel, lineno, m.group(1)))
+
+    # (b) the CMake definitions of the library and the CLI must not mention tests/.
+    cmake = os.path.join(ROOT, "CMakeLists.txt")
+    if os.path.exists(cmake):
+        with open(cmake, encoding="utf-8", errors="replace") as f:
+            text = "\n".join(strip_cmake_comments(line) for line in f.read().splitlines())
+        if verbose:
+            print("checking CMake test-support isolation: CMakeLists.txt")
+        definitions = {
+            "add_library(shodhan_core": cmake_call_text(text, r"add_library\s*\(\s*shodhan_core"),
+            "add_executable(shodhan": cmake_call_text(text, r"add_executable\s*\(\s*shodhan\s"),
+        }
+        # Every set()/file(GLOB)/list() that builds the library or CLI source lists.
+        for m in re.finditer(r"(set|list|file)\s*\(", text):
+            call = cmake_call_text(text[m.start():], r"(set|list|file)\s*\(")
+            if re.search(r"SHODHAN_(OPTIONAL_)?CORE_SOURCES|SHODHAN_CLI_SOURCES", call):
+                definitions["source list: " + call.split()[0] + " " + call.split()[1][:40]] = call
+        for what, body in definitions.items():
+            if "tests" in body:
+                problems.append("CMakeLists.txt: the definition of %s mentions tests/ "
+                                "(test-only code must not reach the library or the CLI)" % what)
+
+    # (c) the built library must not contain test objects.
+    ar = shutil.which("ar")
+    if ar is None:
+        return
+    for build_dir in build_dirs:
+        for dirpath, dirnames, filenames in os.walk(build_dir):
+            dirnames[:] = [d for d in dirnames if d != "CMakeFiles"]
+            for name in filenames:
+                if name in ("libshodhan_core.a", "shodhan_core.lib"):
+                    path = os.path.join(dirpath, name)
+                    try:
+                        res = subprocess.run([ar, "t", path], capture_output=True, text=True, timeout=60)
+                    except (OSError, subprocess.SubprocessError):
+                        continue
+                    if verbose:
+                        print("checking library members: " + os.path.relpath(path, ROOT))
+                    for member in res.stdout.split():
+                        if SUPPORT_RE.search(member) or member.startswith("test_"):
+                            problems.append("%s contains test-only object %s"
+                                            % (os.path.relpath(path, ROOT), member))
+
+
 def find_binaries(build_dir):
     binaries = []
     for dirpath, dirnames, filenames in os.walk(build_dir):
@@ -188,6 +269,7 @@ def main():
     check_cmake(args.verbose, problems)
     check_includes(args.verbose, problems)
     check_binaries(build_dirs, args.verbose, problems)
+    check_test_support_isolation(build_dirs, args.verbose, problems)
 
     if problems:
         print("dependency check FAILED:")
