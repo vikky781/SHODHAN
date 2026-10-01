@@ -80,26 +80,41 @@ KktReport check_kkt(const LpModel& m, const Solution& s, double tol) {
   std::vector<double> aty(cols, 0.0);
   m.A.multiply_transpose(s.y, aty);
   std::vector<double> d(cols, 0.0);
+  // Per-column scale of d_j = c_j - a_j^T y: the magnitude of the terms that
+  // are subtracted, 1 + |c_j| + sum_i |a_ij y_i|. A reduced cost that is a tiny
+  // difference of huge terms can only be as accurate as those terms allow.
+  std::vector<double> dscale(cols, 1.0);
   double cnorm = 0.0;
   double primal_obj = sgn * m.objective_offset;
+  double primal_terms = std::fabs(m.objective_offset);
   for (std::size_t j = 0; j < cols; ++j) {
     const double c = sgn * m.col_cost[j];
     d[j] = c - aty[j];
     cnorm = std::max(cnorm, std::fabs(c));
     primal_obj += c * s.x[j];
+    primal_terms += std::fabs(c * s.x[j]);
+    double terms = 1.0 + std::fabs(c);
+    for (Index p = m.A.col_start[j]; p < m.A.col_start[j + 1]; ++p) {
+      terms += std::fabs(m.A.value[to_size(p)] * s.y[to_size(m.A.row_index[to_size(p)])]);
+    }
+    dscale[j] = terms;
   }
   r.primal_objective = primal_obj;
 
   if (!s.d.empty()) {
     for (std::size_t j = 0; j < cols; ++j) {
-      r.dual_mismatch_abs = std::max(r.dual_mismatch_abs, std::fabs(s.d[j] - d[j]));
+      const double diff = std::fabs(s.d[j] - d[j]);
+      r.dual_mismatch_abs = std::max(r.dual_mismatch_abs, diff);
+      r.dual_mismatch_rel = std::max(r.dual_mismatch_rel, diff / dscale[j]);
     }
   }
-  r.dual_mismatch_rel = r.dual_mismatch_abs / (1.0 + cnorm);
 
   // ---- dual feasibility, complementarity, dual objective ----
   double dual_obj = sgn * m.objective_offset;
+  double dual_terms = std::fabs(m.objective_offset);
   double dual_viol = 0.0;
+  double row_viol_dual = 0.0;
+  double col_viol_rel = 0.0;
   double comp = 0.0;
   for (std::size_t i = 0; i < rows; ++i) {
     const double yi = s.y[i];
@@ -108,15 +123,19 @@ KktReport check_kkt(const LpModel& m, const Solution& s, double tol) {
     if (yi > 0.0) {
       if (is_inf(lo)) {
         dual_viol = std::max(dual_viol, yi);
+        row_viol_dual = std::max(row_viol_dual, yi);
       } else {
         dual_obj += yi * lo;
+        dual_terms += std::fabs(yi * lo);
         comp = std::max(comp, yi * std::fabs(activity[i] - lo));
       }
     } else if (yi < 0.0) {
       if (is_inf(up)) {
         dual_viol = std::max(dual_viol, -yi);
+        row_viol_dual = std::max(row_viol_dual, -yi);
       } else {
         dual_obj += yi * up;
+        dual_terms += std::fabs(yi * up);
         comp = std::max(comp, -yi * std::fabs(up - activity[i]));
       }
     }
@@ -128,24 +147,31 @@ KktReport check_kkt(const LpModel& m, const Solution& s, double tol) {
     if (dj > 0.0) {
       if (is_inf(lo)) {
         dual_viol = std::max(dual_viol, dj);
+        col_viol_rel = std::max(col_viol_rel, dj / dscale[j]);
       } else {
         dual_obj += dj * lo;
+        dual_terms += std::fabs(dj * lo);
         comp = std::max(comp, dj * std::fabs(s.x[j] - lo));
       }
     } else if (dj < 0.0) {
       if (is_inf(up)) {
         dual_viol = std::max(dual_viol, -dj);
+        col_viol_rel = std::max(col_viol_rel, -dj / dscale[j]);
       } else {
         dual_obj += dj * up;
+        dual_terms += std::fabs(dj * up);
         comp = std::max(comp, -dj * std::fabs(up - s.x[j]));
       }
     }
   }
   r.dual_objective = dual_obj;
   r.dual_infeasibility_abs = dual_viol;
-  r.dual_infeasibility_rel = dual_viol / (1.0 + cnorm);
+  r.dual_infeasibility_rel = std::max(row_viol_dual / (1.0 + cnorm), col_viol_rel);
   r.complementarity_abs = comp;
-  const double obj_scale = 1.0 + std::fabs(primal_obj) + std::fabs(dual_obj);
+  // The gap is a difference of sums whose terms may be far larger than the
+  // sums themselves; scale by the larger of the sums and their absolute terms.
+  const double obj_scale =
+      1.0 + std::max(std::fabs(primal_obj) + std::fabs(dual_obj), std::max(primal_terms, dual_terms));
   r.complementarity_rel = comp / obj_scale;
   r.gap_abs = std::fabs(primal_obj - dual_obj);
   r.gap_rel = r.gap_abs / obj_scale;
