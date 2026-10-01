@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - name: linux-clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - name: windows-msvc
+            os: windows-latest
+          - name: macos-clang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.cc }}" ]; then
+            export CC="${{ matrix.cc }}" CXX="${{ matrix.cxx }}"
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHODHAN_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Dependency guard
+        if: runner.os == 'Linux'
+        run: python3 scripts/check_deps.py --build-dir build --verbose
+
+  sanitizers:
+    name: linux-asan-ubsan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset debug-sanitizers -DSHODHAN_WERROR=ON
+
+      - name: Build
+        run: cmake --build --preset debug-sanitizers --parallel
+
+      - name: Test
+        run: ctest --preset debug-sanitizers
