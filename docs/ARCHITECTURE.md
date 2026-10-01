@@ -9,18 +9,22 @@ exist today and the rules the code follows.
 ```
 include/shodhan/   public headers
 src/util/          status names, logger
-src/model/         sparse matrix, LP model, model statistics
+src/model/         sparse matrix, LP model, model statistics, KKT checker
+src/scaling/       row/column/objective scaling and unscaling
+src/presolve/      presolve reductions and postsolve
 src/io/            MPS reader and writer
 src/cli/           the `shodhan` command-line tool
 tests/             unit tests, a header-only test harness, toy models
+tests/support/     TEST-ONLY code: dense reference LP solver, random LP generators
 scripts/           helper scripts (dependency guard)
-docs/              this file and the MPS conventions
+docs/              architecture, conventions, presolve, MPS conventions
 data/              notes on where to download benchmarks (nothing committed)
 ```
 
 Dependencies between modules point downwards only:
 
 ```
+cli  ->  presolve  ->  scaling  ->  model  ->  util
 cli  ->  io  ->  model  ->  util
 ```
 
@@ -28,8 +32,11 @@ cli  ->  io  ->  model  ->  util
 |--------|--------------|--------------|
 | util   | `status.hpp`, `params.hpp`, `logger.hpp`, `constants.hpp`, `version.hpp` | `Status` enum, `Params` defaults, a leveled `Logger`, the infinity constant `kInf` |
 | model  | `sparse_matrix.hpp`, `lp_model.hpp`, `model_stats.hpp` | CSC matrix (validation, triplet construction, CSR copy, SpMV), `LpModel`, descriptive statistics |
+| model  | `solution.hpp`, `kkt.hpp` | `Solution` (x, y, d, objective) and `check_kkt`, independent of any presolve code |
+| scaling | `scaling.hpp` | geometric-mean + equilibration scaling with exact power-of-two factors; `unscale_solution` |
+| presolve | `presolve.hpp` | nine reductions, each with a postsolve record; `postsolve` recovers x, y, d |
 | io     | `mps.hpp` | MPS reader (fixed/free, optional `.gz`) and writer |
-| cli    | (none public) | `shodhan info`, `shodhan solve` |
+| cli    | (none public) | `shodhan info`, `shodhan presolve`, `shodhan solve` |
 
 ### Model conventions
 
@@ -44,8 +51,17 @@ cli  ->  io  ->  model  ->  util
 
 Reading never throws on bad input: `read_mps_*` returns a result with `ok`,
 an `error` string (`file:line: message: 'offending text'`) and a list of
-warnings. The solver entry point does not exist yet; `shodhan solve` reports
-`Status::NotImplemented` and exits with code 2 rather than inventing a result.
+warnings. The solver entry point does not exist yet; `shodhan solve` runs presolve and
+scaling, reports a status that presolve itself proves (infeasible, unbounded, solved), and
+otherwise reports `Status::NotImplemented` and exits with code 2 rather than inventing a result.
+
+## Test-only code
+
+`tests/support/` holds a dense two-phase simplex and seeded random LP generators. They exist so that
+presolve, scaling and postsolve can be checked against an independent solver before a real LP engine
+exists. They are compiled into the test executable only; `shodhan_core` and the CLI never see them, and
+`scripts/check_deps.py` fails if `src/` or `include/` include them or if the CMake definition of the
+library or the CLI mentions `tests/`.
 
 ## Portability
 
