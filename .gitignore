@@ -1,0 +1,31 @@
+# Build output
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+Testing/
+
+# Benchmark data (download only; never commit)
+data/raw/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
