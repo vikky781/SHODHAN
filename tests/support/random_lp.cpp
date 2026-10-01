@@ -21,15 +21,32 @@ struct ColInfo {
   double d = 0.0;
 };
 
+// All generated data lies on coarse dyadic grids so that every product and sum
+// below is EXACT in double precision. The planted pair is then exactly
+// feasible/optimal, and any inaccuracy seen by presolve tests comes from the
+// code under test, not from the generator.
+
+/// Uniform multiple of 1/denom in [lo, hi].
+double grid(Rng& rng, double lo, double hi, int denom) {
+  const int a = static_cast<int>(std::ceil(lo * denom - 1e-12));
+  int b = static_cast<int>(std::floor(hi * denom + 1e-12));
+  if (b < a) b = a;
+  return static_cast<double>(rng.range(a, b)) / static_cast<double>(denom);
+}
+
 double coefficient(Rng& rng, bool wide) {
   const double sign = rng.chance(0.5) ? 1.0 : -1.0;
-  if (wide) return sign * std::pow(10.0, rng.uniform(-4.0, 4.0));
-  return sign * rng.uniform(0.3, 3.0);
+  if (wide) {
+    // 11-bit mantissa times 2^e, e in [-13, 12]: magnitudes from 1.2e-4 to 8.2e3.
+    const double mantissa = static_cast<double>(1024 + rng.range(0, 1023)) / 1024.0;
+    return sign * std::ldexp(mantissa, rng.range(-13, 12));
+  }
+  return sign * grid(rng, 0.3, 3.0, 1024);
 }
 
 double multiplier(Rng& rng, double degeneracy) {
   if (rng.chance(degeneracy)) return 0.0;
-  return rng.uniform(0.2, 3.0);
+  return grid(rng, 0.2, 3.0, 16);
 }
 
 }  // namespace
@@ -135,21 +152,21 @@ RandomLp make_random_lp(std::uint64_t seed, const RandomLpOptions& o) {
     const int role = col_role[static_cast<std::size_t>(j)];
     if (role == kColForcing) continue;  // set below
     if (role == kColFixed) {
-      c.lo = c.up = c.x = rng.uniform(-5.0, 5.0);
-      c.d = rng.chance(0.3) ? 0.0 : rng.uniform(-3.0, 3.0);
+      c.lo = c.up = c.x = grid(rng, -5.0, 5.0, 8);
+      c.d = rng.chance(0.3) ? 0.0 : grid(rng, -3.0, 3.0, 16);
       continue;
     }
     const bool is_free = rng.chance(o.free_col_fraction);
     if (is_free) {
       c.lo = -kInf;
       c.up = kInf;
-      c.x = rng.uniform(-5.0, 5.0);
+      c.x = grid(rng, -5.0, 5.0, 8);
       c.d = 0.0;
       continue;
     }
     const double kind = rng.unit();
-    const double base = rng.uniform(-5.0, 5.0);
-    const double width = rng.uniform(1.0, 6.0);
+    const double base = grid(rng, -5.0, 5.0, 8);
+    const double width = grid(rng, 1.0, 6.0, 8);
     if (kind < 0.35) {  // lower only
       c.lo = base;
       c.up = kInf;
@@ -171,11 +188,11 @@ RandomLp make_random_lp(std::uint64_t seed, const RandomLpOptions& o) {
         c.d = -multiplier(rng, o.degeneracy);
       }
     } else if (is_inf(c.lo)) {
-      c.x = c.up - rng.uniform(0.5, 3.0);
+      c.x = c.up - grid(rng, 0.5, 3.0, 8);
     } else if (is_inf(c.up)) {
-      c.x = c.lo + rng.uniform(0.5, 3.0);
+      c.x = c.lo + grid(rng, 0.5, 3.0, 8);
     } else {
-      c.x = c.lo + rng.uniform(0.15, 0.85) * (c.up - c.lo);
+      c.x = c.lo + grid(rng, 0.15 * (c.up - c.lo), 0.85 * (c.up - c.lo), 8);
     }
   }
   for (const Forcing& f : forcing) {
@@ -186,8 +203,8 @@ RandomLp make_random_lp(std::uint64_t seed, const RandomLpOptions& o) {
         if (e.first == j) a = e.second;
       }
       ColInfo& c = col[static_cast<std::size_t>(j)];
-      c.lo = rng.uniform(-4.0, 4.0);
-      c.up = c.lo + rng.uniform(1.0, 5.0);
+      c.lo = grid(rng, -4.0, 4.0, 8);
+      c.up = c.lo + grid(rng, 1.0, 5.0, 8);
       const bool at_upper = f.max_forcing ? (a > 0) : (a < 0);
       c.x = at_upper ? c.up : c.lo;
       c.d = at_upper ? -multiplier(rng, o.degeneracy) : multiplier(rng, o.degeneracy);
@@ -215,7 +232,7 @@ RandomLp make_random_lp(std::uint64_t seed, const RandomLpOptions& o) {
         if (f.row == i) fr = &f;
       }
       if (fr->equality) {
-        yi = rng.chance(o.degeneracy) ? 0.0 : rng.uniform(-3.0, 3.0);
+        yi = rng.chance(o.degeneracy) ? 0.0 : grid(rng, -3.0, 3.0, 16);
       } else if (fr->max_forcing) {
         up = kInf;
         yi = multiplier(rng, o.degeneracy);
@@ -224,12 +241,12 @@ RandomLp make_random_lp(std::uint64_t seed, const RandomLpOptions& o) {
         yi = -multiplier(rng, o.degeneracy);
       }
     } else if (role == kRowDoubleton) {
-      yi = rng.chance(o.degeneracy) ? 0.0 : rng.uniform(-3.0, 3.0);
+      yi = rng.chance(o.degeneracy) ? 0.0 : grid(rng, -3.0, 3.0, 16);
     } else {
       const double kind = rng.unit();
       const bool active = rng.chance(o.active_fraction);
-      const double slack1 = rng.uniform(0.3, 3.0);
-      const double slack2 = rng.uniform(0.3, 3.0);
+      const double slack1 = grid(rng, 0.3, 3.0, 8);
+      const double slack2 = grid(rng, 0.3, 3.0, 8);
       if (rng.chance(o.free_row_fraction)) {
         lo = -kInf;
         up = kInf;
@@ -249,7 +266,7 @@ RandomLp make_random_lp(std::uint64_t seed, const RandomLpOptions& o) {
           up = r + slack2;
         }
       } else if (kind < 0.15) {  // equality
-        yi = rng.chance(o.degeneracy) ? 0.0 : rng.uniform(-3.0, 3.0);
+        yi = rng.chance(o.degeneracy) ? 0.0 : grid(rng, -3.0, 3.0, 16);
       } else if (kind < 0.575) {  // <=
         lo = -kInf;
         if (active) {
@@ -294,7 +311,7 @@ RandomLp make_random_lp(std::uint64_t seed, const RandomLpOptions& o) {
   model.A.multiply_transpose(y, aty);
   model.col_cost.resize(static_cast<std::size_t>(n));
   double obj = 0.0;
-  model.objective_offset = rng.chance(0.5) ? rng.uniform(-5.0, 5.0) : 0.0;
+  model.objective_offset = rng.chance(0.5) ? grid(rng, -5.0, 5.0, 8) : 0.0;
   for (int j = 0; j < n; ++j) {
     const std::size_t sj = static_cast<std::size_t>(j);
     model.col_cost[sj] = aty[sj] + d[sj];
@@ -399,10 +416,10 @@ LpModel make_random_unbounded_lp(std::uint64_t seed, const RandomLpOptions& opti
       const bool lo_f = !is_inf(m.row_lower[to_size(i)]);
       const bool up_f = !is_inf(m.row_upper[to_size(i)]);
       if (lo_f == up_f) {
-        if (!lo_f && rng.chance(0.5)) coefs.emplace_back(i, rng.uniform(-2.0, 2.0));  // free row
+        if (!lo_f && rng.chance(0.5)) coefs.emplace_back(i, grid(rng, -2.0, 2.0, 8));  // free row
         continue;
       }
-      if (rng.chance(0.7)) coefs.emplace_back(i, (lo_f ? 1.0 : -1.0) * rng.uniform(0.3, 2.0));
+      if (rng.chance(0.7)) coefs.emplace_back(i, (lo_f ? 1.0 : -1.0) * grid(rng, 0.375, 2.0, 8));
     }
     if (!coefs.empty()) {
       append_col(&m, coefs, -1.0, 0.0, kInf);

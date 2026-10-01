@@ -2,6 +2,9 @@
 
 #include "support/dense_ref_lp.hpp"
 
+#include "shodhan/kkt.hpp"
+#include "shodhan/scaling.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -13,10 +16,8 @@ namespace {
 
 using Real = long double;
 
-constexpr Real kPivotTol = 1e-10L;
-constexpr Real kCostTol = 1e-10L;
-constexpr long kRefactorEvery = 40;
-constexpr long kMaxIterations = 200000;
+constexpr Real kCostTol = 1e-12L;
+constexpr long kMaxIterations = 20000;
 
 // How model column j maps onto non-negative variables z:
 //   x_j = shift + sign * z[a]              (kind 0: lower finite, kind 1: only upper finite)
@@ -81,61 +82,154 @@ void refactor(Tableau& tb, const std::vector<std::vector<Real>>& orig) {
   }
 }
 
-enum class SimplexOutcome { Optimal, Unbounded, IterationLimit };
+enum class SimplexOutcome { Optimal, Unbounded, IterationLimit, Unsafe };
 
-// Bland's rule. `allowed(j)` says whether column j may enter the basis.
+// Numerical settings; solve_dense_lp retries with more conservative ones when an
+// attempt ends in a numerical failure.
+struct Settings {
+  Real pivot_tol;
+  long refactor_every;
+  bool harris;  // Harris two-pass ratio test; otherwise textbook Bland ratio test
+};
+
+// Entering variable: smallest index with a negative reduced cost (Bland); a
+// candidate that no row can block with a safe pivot is skipped in favour of the
+// next one. Leaving variable: Harris two-pass ratio test with a preference for
+// large pivots among near-ties (smallest basis index breaks remaining ties),
+// which keeps the tableau well conditioned. `ent_tol[j]` is the reduced-cost
+// tolerance of column j. `art_start` is the index of the first artificial
+// column when artificials that stayed in the basis at level zero must be kept
+// at zero (phase 2), or -1.
 SimplexOutcome simplex(Tableau& tb, const std::vector<Real>& cost, const std::vector<char>& allowed,
-                       const std::vector<std::vector<Real>>& orig, long* iterations) {
+                       const std::vector<Real>& ent_tol, const std::vector<Real>& colscale,
+                       const std::vector<std::vector<Real>>& orig, int art_start, const Settings& set,
+                       long* iterations) {
   const std::size_t n = static_cast<std::size_t>(tb.n);
+  const std::size_t m = static_cast<std::size_t>(tb.m);
+  constexpr Real kHarrisDelta = 1e-9L;
+  constexpr Real kClearlyNegative = 1e4L;  // x the column's tolerance: unbounded only beyond this
   std::vector<Real> red(n);
   std::vector<char> is_basic(n);
+  std::vector<Real> step(m);
+  std::vector<char> eligible(m);
   for (;;) {
     if (++*iterations > kMaxIterations) return SimplexOutcome::IterationLimit;
-    if (*iterations % kRefactorEvery == 0) refactor(tb, orig);
+    if (*iterations % set.refactor_every == 0) refactor(tb, orig);
     // Reduced costs from scratch: red_j = c_j - sum_k c_B[k] T[k][j].
     std::fill(is_basic.begin(), is_basic.end(), 0);
-    for (int k = 0; k < tb.m; ++k) is_basic[static_cast<std::size_t>(tb.basis[static_cast<std::size_t>(k)])] = 1;
+    for (std::size_t k = 0; k < m; ++k) is_basic[static_cast<std::size_t>(tb.basis[k])] = 1;
     for (std::size_t j = 0; j < n; ++j) red[j] = cost[j];
-    for (int k = 0; k < tb.m; ++k) {
-      const Real cb = cost[static_cast<std::size_t>(tb.basis[static_cast<std::size_t>(k)])];
+    for (std::size_t k = 0; k < m; ++k) {
+      const Real cb = cost[static_cast<std::size_t>(tb.basis[k])];
       if (cb == 0) continue;
-      const std::vector<Real>& r = tb.t[static_cast<std::size_t>(k)];
+      const std::vector<Real>& r = tb.t[k];
       for (std::size_t j = 0; j < n; ++j) red[j] -= cb * r[j];
     }
+
     int enter = -1;
-    for (std::size_t j = 0; j < n; ++j) {
-      if (allowed[j] && !is_basic[j] && red[j] < -kCostTol) {
-        enter = static_cast<int>(j);
-        break;
+    int leave = -1;
+    bool clearly_unbounded = false;
+    bool unsafe_negative = false;  // attractive column whose only blockers are too small to pivot on
+    for (std::size_t e = 0; e < n && leave < 0; ++e) {
+      if (!allowed[e] || is_basic[e] || !(red[e] < -ent_tol[e])) continue;
+
+      // A pivot must not be noise next to the column's large entries (relative
+      // tolerance), but a column whose entries are all small is still usable.
+      Real col_max = 0;
+      for (std::size_t k = 0; k < m; ++k) col_max = std::max(col_max, std::fabs(tb.t[k][e]));
+      const Real ptol = std::max<Real>(set.pivot_tol * col_max, 1e-14L);
+
+      // Pass 1: the largest step that keeps every row within a small tolerance.
+      bool any = false;
+      Real theta = 0;
+      for (std::size_t k = 0; k < m; ++k) {
+        const Real a = tb.t[k][e];
+        eligible[k] = 0;
+        if (art_start >= 0 && tb.basis[k] >= art_start) {
+          // A zero-level artificial must not increase: any nonzero entry
+          // blocks at step 0 (the pivot may be negative).
+          if (std::fabs(a) <= ptol) continue;
+          eligible[k] = 1;
+          step[k] = 0;
+          const Real bound = (kHarrisDelta / colscale[static_cast<std::size_t>(tb.basis[k])]) / std::fabs(a);
+          if (!any || bound < theta) theta = bound;
+          any = true;
+          continue;
+        }
+        if (a <= ptol) continue;
+        eligible[k] = 1;
+        const Real rhs = std::max<Real>(tb.t[k][n], 0);
+        step[k] = rhs / a;
+        const Real delta_k = kHarrisDelta / colscale[static_cast<std::size_t>(tb.basis[k])];
+        const Real bound = (rhs + delta_k) / a;
+        if (!any || bound < theta) theta = bound;
+        any = true;
       }
+      if (!any) {
+        // Nothing can be pivoted on safely. If there are genuine (if small) blocking
+        // entries this is a numerical hazard, not a proof of unboundedness.
+        Real max_blocking = 0;
+        for (std::size_t k = 0; k < m; ++k) {
+          const Real a = tb.t[k][e];
+          const bool zero_level_artificial = art_start >= 0 && tb.basis[k] >= art_start;
+          max_blocking = std::max(max_blocking, zero_level_artificial ? std::fabs(a) : a);
+        }
+        if (red[e] < -kClearlyNegative * ent_tol[e]) {
+          if (max_blocking <= 1e-12L) {
+            clearly_unbounded = true;
+          } else {
+            unsafe_negative = true;
+          }
+        }
+        continue;  // try the next candidate
+      }
+
+      if (set.harris) {
+        // Pass 2: among rows that block within theta, take the largest pivot.
+        Real best_pivot = 0;
+        for (std::size_t k = 0; k < m; ++k) {
+          if (!eligible[k] || step[k] > theta) continue;
+          const Real a = std::fabs(tb.t[k][e]);
+          if (leave < 0 || a > best_pivot * (1 + 1e-9L) ||
+              (a >= best_pivot * (1 - 1e-9L) && tb.basis[k] < tb.basis[static_cast<std::size_t>(leave)])) {
+            leave = static_cast<int>(k);
+            best_pivot = a;
+          }
+        }
+      } else {
+        // Textbook Bland: exact minimum ratio, ties to the smallest basis index.
+        Real best = 0;
+        for (std::size_t k = 0; k < m; ++k) {
+          if (!eligible[k]) continue;
+          const Real ratio = step[k];
+          if (leave < 0 || ratio < best - 1e-12L * (1 + std::fabs(best)) ||
+              (ratio <= best + 1e-12L * (1 + std::fabs(best)) &&
+               tb.basis[k] < tb.basis[static_cast<std::size_t>(leave)])) {
+            leave = static_cast<int>(k);
+            best = ratio;
+          }
+        }
+      }
+      enter = static_cast<int>(e);
     }
-    if (enter < 0) {
+
+    if (leave < 0) {
+      if (clearly_unbounded) return SimplexOutcome::Unbounded;
+      if (unsafe_negative) return SimplexOutcome::Unsafe;
       refactor(tb, orig);
       return SimplexOutcome::Optimal;
     }
-
-    int leave = -1;
-    Real best = 0;
-    for (int k = 0; k < tb.m; ++k) {
-      const std::vector<Real>& r = tb.t[static_cast<std::size_t>(k)];
-      const Real a = r[static_cast<std::size_t>(enter)];
-      if (a <= kPivotTol) continue;
-      const Real ratio = r[n] / a;
-      if (leave < 0 || ratio < best - 1e-12L * (1 + std::fabs(best)) ||
-          (ratio <= best + 1e-12L * (1 + std::fabs(best)) &&
-           tb.basis[static_cast<std::size_t>(k)] < tb.basis[static_cast<std::size_t>(leave)])) {
-        leave = k;
-        best = ratio;
-      }
-    }
-    if (leave < 0) return SimplexOutcome::Unbounded;
     pivot(tb, leave, enter);
+    // Clean tiny negative right-hand sides that Harris's tolerance allowed.
+    if (set.harris) for (std::size_t k = 0; k < m; ++k) {
+      if (tb.t[k][n] < 0 && tb.t[k][n] > -(kHarrisDelta * 10) / colscale[static_cast<std::size_t>(tb.basis[k])]) tb.t[k][n] = 0;
+    }
   }
 }
 
 }  // namespace
 
-RefLpResult solve_dense_lp(const LpModel& model) {
+static RefLpResult solve_once(const LpModel& model, const Settings& set) {
   RefLpResult result;
   const int mrows = model.n_rows;
   const int ncols = model.n_cols;
@@ -232,7 +326,7 @@ RefLpResult solve_dense_lp(const LpModel& model) {
   std::vector<Real> rs(static_cast<std::size_t>(m), 1);
   std::vector<Real> cs(static_cast<std::size_t>(ntot), 1);
   auto pow2 = [](Real v) { return std::ldexp(static_cast<Real>(1), static_cast<int>(std::lround(std::log2(v)))); };
-  for (int pass = 0; pass < 6; ++pass) {
+  for (int pass = 0; pass < 12; ++pass) {
     for (int k = 0; k < m; ++k) {
       Real mn = 0;
       Real mx = 0;
@@ -262,6 +356,21 @@ RefLpResult solve_dense_lp(const LpModel& model) {
       cs[static_cast<std::size_t>(t)] *= f;
     }
   }
+  // One max-abs equilibration pass: columns, then rows.
+  for (int t = 0; t < ntot; ++t) {
+    Real mx = 0;
+    for (int k = 0; k < m; ++k) mx = std::max(mx, std::fabs(dense[static_cast<std::size_t>(k)][static_cast<std::size_t>(t)]));
+    if (mx == 0) continue;
+    for (int k = 0; k < m; ++k) dense[static_cast<std::size_t>(k)][static_cast<std::size_t>(t)] /= mx;
+    cs[static_cast<std::size_t>(t)] /= mx;
+  }
+  for (int k = 0; k < m; ++k) {
+    Real mx = 0;
+    for (int t = 0; t < ntot; ++t) mx = std::max(mx, std::fabs(dense[static_cast<std::size_t>(k)][static_cast<std::size_t>(t)]));
+    if (mx == 0) continue;
+    for (int t = 0; t < ntot; ++t) dense[static_cast<std::size_t>(k)][static_cast<std::size_t>(t)] /= mx;
+    rs[static_cast<std::size_t>(k)] /= mx;
+  }
   for (Real& v : rs) v = pow2(v);
   for (Real& v : cs) v = pow2(v);
 
@@ -285,24 +394,33 @@ RefLpResult solve_dense_lp(const LpModel& model) {
     tb.basis[static_cast<std::size_t>(k)] = ntot + k;
   }
   const std::vector<std::vector<Real>> original = tb.t;
+  std::vector<Real> cs_full(static_cast<std::size_t>(n), 1);
+  for (int t = 0; t < ntot; ++t) cs_full[static_cast<std::size_t>(t)] = cs[static_cast<std::size_t>(t)];
 
   // ---- phase 1 ----
   std::vector<Real> cost1(static_cast<std::size_t>(n), 0);
   for (int k = 0; k < m; ++k) cost1[static_cast<std::size_t>(ntot + k)] = 1;
   std::vector<char> allowed(static_cast<std::size_t>(n), 1);
-  SimplexOutcome out = simplex(tb, cost1, allowed, original, &result.iterations);
-  if (out == SimplexOutcome::IterationLimit) {
+  const std::vector<Real> ent_tol1(static_cast<std::size_t>(n), kCostTol);
+  SimplexOutcome out = simplex(tb, cost1, allowed, ent_tol1, cs_full, original, -1, set, &result.iterations);
+  if (out != SimplexOutcome::Optimal) {
     result.status = Status::NumericalError;
     return result;
   }
+  // Each artificial still in the basis is judged in the ORIGINAL units of its own
+  // row: a conflict in a small row must not hide under the scale of a large one,
+  // and scaling noise must not look like infeasibility.
   Real infeas = 0;
-  Real rhs_scale = 1;
+  bool infeasible = false;
   for (int k = 0; k < m; ++k) {
     const std::size_t sk = static_cast<std::size_t>(k);
-    if (tb.basis[sk] >= ntot) infeas += tb.t[sk][static_cast<std::size_t>(n)];
-    rhs_scale = std::max(rhs_scale, std::fabs(rs[sk] * rows[sk].rhs));
+    if (tb.basis[sk] < ntot) continue;
+    const Real value = tb.t[sk][static_cast<std::size_t>(n)];
+    infeas += value;
+    if (value / rs[sk] > 1e-8L * (1 + std::fabs(rows[sk].rhs))) infeasible = true;
   }
-  if (infeas > 1e-8L * rhs_scale) {
+  result.phase1_residual = static_cast<double>(infeas);
+  if (infeasible) {
     result.status = Status::Infeasible;
     return result;
   }
@@ -342,8 +460,22 @@ RefLpResult solve_dense_lp(const LpModel& model) {
     for (Real& v : cost2) v *= cost_scale;
   }
   for (int k = 0; k < m; ++k) allowed[static_cast<std::size_t>(ntot + k)] = 0;
-  out = simplex(tb, cost2, allowed, original, &result.iterations);
-  if (out == SimplexOutcome::IterationLimit) {
+  // Reduced-cost tolerance of each column in UNSCALED units: scaled and
+  // normalised reduced costs are cs * cost_scale times the original ones.
+  std::vector<Real> cmag(static_cast<std::size_t>(n), 0);
+  for (int j = 0; j < ncols; ++j) {
+    const ColMap& c = cmap[static_cast<std::size_t>(j)];
+    const Real cj = std::fabs(static_cast<Real>(model.col_cost[static_cast<std::size_t>(j)]));
+    cmag[static_cast<std::size_t>(c.a)] = cj;
+    if (c.kind == 2) cmag[static_cast<std::size_t>(c.b)] = cj;
+  }
+  std::vector<Real> ent_tol2(static_cast<std::size_t>(n), kCostTol);
+  for (int t = 0; t < ntot; ++t) {
+    const std::size_t st = static_cast<std::size_t>(t);
+    ent_tol2[st] = kCostTol * cs[st] * cost_scale * (1 + cmag[st]);
+  }
+  out = simplex(tb, cost2, allowed, ent_tol2, cs_full, original, ntot, set, &result.iterations);
+  if (out == SimplexOutcome::IterationLimit || out == SimplexOutcome::Unsafe) {
     result.status = Status::NumericalError;
     return result;
   }
@@ -353,6 +485,12 @@ RefLpResult solve_dense_lp(const LpModel& model) {
   }
 
   // ---- primal ----
+  for (int k = 0; k < m; ++k) {
+    const std::size_t sk = static_cast<std::size_t>(k);
+    if (tb.basis[sk] >= ntot) {
+      result.artificial_residual = std::max(result.artificial_residual, static_cast<double>(std::fabs(tb.t[sk][static_cast<std::size_t>(n)])));
+    }
+  }
   std::vector<Real> z(static_cast<std::size_t>(n), 0);
   for (int k = 0; k < m; ++k) {
     const std::size_t bi = static_cast<std::size_t>(tb.basis[static_cast<std::size_t>(k)]);
@@ -370,6 +508,41 @@ RefLpResult solve_dense_lp(const LpModel& model) {
       v = c.shift + c.sign * z[static_cast<std::size_t>(c.a)];
     }
     sol.x[static_cast<std::size_t>(j)] = static_cast<double>(v);
+  }
+
+  // Accept the point only if it satisfies the ORIGINAL constraints: a basis that
+  // is infeasible after reinversion means pivoting went wrong numerically.
+  {
+    std::vector<double> act(static_cast<std::size_t>(mrows), 0.0);
+    std::vector<double> mag(static_cast<std::size_t>(mrows), 0.0);
+    for (int j = 0; j < ncols; ++j) {
+      const double xj = sol.x[static_cast<std::size_t>(j)];
+      for (Index p = model.A.col_start[static_cast<std::size_t>(j)]; p < model.A.col_start[static_cast<std::size_t>(j) + 1]; ++p) {
+        const std::size_t i = static_cast<std::size_t>(model.A.row_index[static_cast<std::size_t>(p)]);
+        const double t = model.A.value[static_cast<std::size_t>(p)] * xj;
+        act[i] += t;
+        mag[i] += std::fabs(t);
+      }
+    }
+    bool bad = false;
+    for (int i = 0; i < mrows; ++i) {
+      const std::size_t si = static_cast<std::size_t>(i);
+      const double lo = model.row_lower[si];
+      const double up = model.row_upper[si];
+      if (!is_inf(lo) && lo - act[si] > 1e-9 * (1.0 + std::fabs(lo) + mag[si])) bad = true;
+      if (!is_inf(up) && act[si] - up > 1e-9 * (1.0 + std::fabs(up) + mag[si])) bad = true;
+    }
+    for (int j = 0; j < ncols; ++j) {
+      const std::size_t sj = static_cast<std::size_t>(j);
+      const double lo = model.col_lower[sj];
+      const double up = model.col_upper[sj];
+      if (!is_inf(lo) && lo - sol.x[sj] > 1e-9 * (1.0 + std::fabs(lo))) bad = true;
+      if (!is_inf(up) && sol.x[sj] - up > 1e-9 * (1.0 + std::fabs(up))) bad = true;
+    }
+    if (bad) {
+      result.status = Status::NumericalError;
+      return result;
+    }
   }
 
   // ---- duals: y' = c_B^T B^{-1}, read from the artificial columns ----
@@ -405,6 +578,96 @@ RefLpResult solve_dense_lp(const LpModel& model) {
   }
   sol.objective = obj;
   result.status = Status::Optimal;
+  return result;
+}
+
+namespace {
+
+// Un-hidden accuracy of an optimal answer: worst of the relative primal
+// violation, relative dual violation and the plain relative duality gap.
+double quality(const LpModel& model, const Solution& sol) {
+  const KktReport k = check_kkt(model, sol, 1.0);
+  const double gap = std::fabs(k.primal_objective - k.dual_objective) /
+                     (1.0 + std::fabs(k.primal_objective) + std::fabs(k.dual_objective));
+  return std::max({k.primal_infeasibility_rel, k.dual_infeasibility_rel, k.dual_mismatch_rel, gap});
+}
+
+}  // namespace
+
+RefLpResult solve_dense_lp(const LpModel& model) {
+  const Settings attempts[] = {{1e-9L, 40, false}, {1e-8L, 40, true}, {1e-7L, 10, false}, {1e-7L, 10, true},
+                               {1e-6L, 4, true},   {1e-9L, 5, false}, {1e-8L, 5, true},   {1e-5L, 2, true}};
+  constexpr double kGoodEnough = 1e-9;
+  constexpr int kVerdictVotes = 2;  // definite verdicts need two configurations to agree
+
+  RefLpResult best_optimal;  // lowest-residual Optimal answer so far
+  best_optimal.status = Status::NumericalError;
+  double best_quality = 1e300;
+  RefLpResult verdict;  // last definite Infeasible / Unbounded answer
+  verdict.status = Status::NumericalError;
+  int votes_infeasible = 0;
+  int votes_unbounded = 0;
+  long total_iterations = 0;
+
+  // Returns true when the search can stop.
+  auto consider = [&](RefLpResult r) -> bool {
+    total_iterations += r.iterations;
+    switch (r.status) {
+      case Status::Optimal: {
+        const double q = quality(model, r.solution);
+        if (q < best_quality) {
+          best_quality = q;
+          best_optimal = std::move(r);
+        }
+        return best_quality <= kGoodEnough;
+      }
+      case Status::Infeasible:
+        ++votes_infeasible;
+        verdict = std::move(r);
+        return votes_infeasible >= kVerdictVotes;
+      case Status::Unbounded:
+        ++votes_unbounded;
+        verdict = std::move(r);
+        return votes_unbounded >= kVerdictVotes;
+      default:
+        return false;
+    }
+  };
+
+  bool done = false;
+  for (const Settings& set : attempts) {
+    if (consider(solve_once(model, set))) {
+      done = true;
+      break;
+    }
+  }
+  if (!done) {
+    // Last resort: solve a pre-scaled copy and map the answer back.
+    const Scaling sc = compute_scaling(model);
+    const LpModel scaled = apply_scaling(model, sc);
+    for (const Settings& set : attempts) {
+      RefLpResult r2 = solve_once(scaled, set);
+      if (r2.status == Status::Optimal) r2.solution = unscale_solution(sc, r2.solution);
+      if (consider(std::move(r2))) break;
+    }
+  }
+
+  RefLpResult result;
+  result.status = Status::NumericalError;
+  if (best_optimal.status == Status::Optimal && best_quality <= kGoodEnough) {
+    result = std::move(best_optimal);
+  } else if (votes_infeasible >= kVerdictVotes) {
+    result = std::move(verdict);
+    result.status = Status::Infeasible;
+  } else if (votes_unbounded >= kVerdictVotes) {
+    result = std::move(verdict);
+    result.status = Status::Unbounded;
+  } else if (best_optimal.status == Status::Optimal) {
+    result = std::move(best_optimal);  // best available, not fully accurate
+  } else if (votes_infeasible + votes_unbounded > 0) {
+    result = std::move(verdict);  // a single (unconfirmed) verdict is all there is
+  }
+  result.iterations = total_iterations;
   return result;
 }
 

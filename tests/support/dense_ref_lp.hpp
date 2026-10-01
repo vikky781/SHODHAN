@@ -18,6 +18,10 @@ struct RefLpResult {
   /// Filled when status == Optimal. y and d follow docs/CONVENTIONS.md.
   Solution solution;
   long iterations = 0;
+  /// Diagnostics: phase-1 residual (scaled units) and the largest artificial
+  /// variable still basic after phase 2.
+  double phase1_residual = 0.0;
+  double artificial_residual = 0.0;
 };
 
 /// Solves the LP relaxation of `model` (integrality is ignored).
