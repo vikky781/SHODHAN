@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(SHODHAN_BUILD_TESTS "Build the unit tests" ON)
 option(SHODHAN_ENABLE_ZLIB "Enable reading .gz input (requires zlib)" OFF)
 option(SHODHAN_WERROR "Treat compiler warnings as errors" OFF)
+option(SHODHAN_BUILD_STRESS "Build the opt-in LP stress harness (tests/stress; not part of ctest)" OFF)
 option(SHODHAN_SANITIZE "Enable AddressSanitizer and UBSan (GCC/Clang only)" OFF)
 
 # Applies the project warning level, optional -Werror and optional sanitizers.
@@ -82,4 +83,13 @@ if(SHODHAN_BUILD_TESTS)
       message(STATUS "Python3 not found: CLI end-to-end test disabled")
     endif()
   endif()
+endif()
+
+if(SHODHAN_BUILD_STRESS)
+  # Opt-in stress harness: reuses the test support code, never part of the default ctest run.
+  file(GLOB SHODHAN_STRESS_SUPPORT CONFIGURE_DEPENDS tests/support/*.cpp)
+  add_executable(shodhan_stress tests/stress/lp_stress.cpp ${SHODHAN_STRESS_SUPPORT})
+  target_link_libraries(shodhan_stress PRIVATE shodhan_core)
+  target_include_directories(shodhan_stress PRIVATE tests src)
+  shodhan_configure_target(shodhan_stress)
 endif()
