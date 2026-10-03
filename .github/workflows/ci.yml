@@ -63,3 +63,49 @@ jobs:
 
       - name: Test
         run: ctest --preset debug-sanitizers
+
+  kasauti-unit:
+    name: kasauti-python-${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.x"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Unit tests (the differential parser test is skipped without the solver)
+        working-directory: verify
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Independence check (standard library only, no solver sources)
+        run: python scripts/check_verify_independence.py
+
+  kasauti-integration:
+    name: linux-ctest-kasauti
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHODHAN_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Corpus, exact and float verification, differential parser test, mutations
+        run: ctest --test-dir build -R kasauti --output-on-failure
+
+      - name: Independence check
+        run: python scripts/check_verify_independence.py
+
+      - name: Dependency guard
+        run: python scripts/check_deps.py --build-dir build --verbose
