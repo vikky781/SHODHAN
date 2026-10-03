@@ -13,9 +13,10 @@ src/model/         sparse matrix, LP model, model statistics, KKT checker
 src/scaling/       row/column/objective scaling and unscaling
 src/presolve/      presolve reductions and postsolve
 src/io/            MPS reader and writer
+src/linalg/        sparse LU of simplex bases, FTRAN/BTRAN, Forrest-Tomlin update
 src/cli/           the `shodhan` command-line tool
 tests/             unit tests, a header-only test harness, toy models
-tests/support/     TEST-ONLY code: dense reference LP solver, random LP generators
+tests/support/     TEST-ONLY code: dense reference LP solver, dense LU oracle, random LP and basis generators
 scripts/           helper scripts (dependency guard)
 docs/              architecture, conventions, presolve, MPS conventions
 data/              notes on where to download benchmarks (nothing committed)
@@ -26,6 +27,7 @@ Dependencies between modules point downwards only:
 ```
 cli  ->  presolve  ->  scaling  ->  model  ->  util
 cli  ->  io  ->  model  ->  util
+cli  ->  linalg  ->  model  ->  util
 ```
 
 | Module | Main headers | What it does |
@@ -36,7 +38,8 @@ cli  ->  io  ->  model  ->  util
 | scaling | `scaling.hpp` | geometric-mean + equilibration scaling with exact power-of-two factors; `unscale_solution` |
 | presolve | `presolve.hpp` | nine reductions, each with a postsolve record; `postsolve` recovers x, y, d |
 | io     | `mps.hpp` | MPS reader (fixed/free, optional `.gz`) and writer |
-| cli    | (none public) | `shodhan info`, `shodhan presolve`, `shodhan solve` |
+| linalg | `sparse_work.hpp`, `basis_factor.hpp` | `SparseWork` (dense array + index list), `BasisFactor`: LU of a basis of `[A | -I]`, `ftran`/`btran`, `repair`, Forrest-Tomlin `update` (see `docs/LU.md`) |
+| cli    | (none public) | `shodhan info`, `shodhan presolve`, `shodhan solve`, `shodhan factor-bench` |
 
 ### Model conventions
 
@@ -57,9 +60,9 @@ otherwise reports `Status::NotImplemented` and exits with code 2 rather than inv
 
 ## Test-only code
 
-`tests/support/` holds a dense two-phase simplex and seeded random LP generators. They exist so that
-presolve, scaling and postsolve can be checked against an independent solver before a real LP engine
-exists. They are compiled into the test executable only; `shodhan_core` and the CLI never see them, and
+`tests/support/` holds a dense two-phase simplex, a dense LU with partial pivoting and seeded random LP and
+basis generators. They exist so that presolve, scaling, postsolve and the basis factorization can be checked
+against independent code before a real LP engine exists. They are compiled into the test executable only; `shodhan_core` and the CLI never see them, and
 `scripts/check_deps.py` fails if `src/` or `include/` include them or if the CMake definition of the
 library or the CLI mentions `tests/`.
 

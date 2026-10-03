@@ -92,3 +92,24 @@ x = C x'     y = R y' / s        d = d' / (s C)     objective = objective' / s
 ```
 
 Integer and binary columns always have `C_jj = 1`.
+
+## Computational form: structural and logical variables
+
+The simplex code and the basis factorization (`docs/LU.md`) work with the model written as
+
+```
+A x - r = 0
+```
+
+where `x` are the **structural** variables (bounds `col_lo`, `col_hi`, costs `c`) and `r` are the
+**logical** variables, one per row, equal to the row activities (bounds `row_lo`, `row_hi`, cost 0).
+
+- The logical column of row `i` is `-e_i` (the negative unit vector) and its variable index is `n + i`.
+  Variable indices therefore run over `0..n-1` (structural, column `j` of `A`) and `n..n+m-1` (logical).
+- A **basis** is a list of `m` variable indices; entry `p` is the variable at *basis position* `p`. The basis
+  matrix `B` has `m` columns taken from `[A | -I]`, column `p` being the column of `basis[p]`.
+- The reduced cost of logical `n + i` is `d = 0 - (-e_i)^T y = y_i`: it equals the row dual. This is the
+  same sign rule as in the KKT table above (a row at its lower bound has `y_i >= 0`, which is a logical at its
+  lower bound with a nonnegative reduced cost).
+- `ftran` solves `B x = a` with `a` indexed by row and `x` by basis position; `btran` solves
+  `B^T y = c` with `c` indexed by basis position and `y` by row.

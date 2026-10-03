@@ -4,7 +4,9 @@ A from-scratch LP/MILP/QP optimization solver core, written in C++20.
 
 SHODHAN is being built step by step. At this stage it can read and write MPS
 models, describe them, scale them, and presolve LPs and MIPs with a postsolve
-that recovers primal and dual solutions; it cannot solve anything yet.
+that recovers primal and dual solutions. It also has the sparse LU factorization
+of simplex bases (with FTRAN/BTRAN and the Forrest-Tomlin update) that a simplex
+solver will sit on; it cannot solve anything yet.
 
 ## Build
 
@@ -56,6 +58,7 @@ SHODHAN_SEED_FIRST=1 SHODHAN_SEED_COUNT=6000 build/shodhan_tests presolve
 shodhan info  model.mps    # summary: size, types, bounds, scaling indicator
 shodhan presolve model.mps [--write-presolved out.mps] [--no-dual-needed] [--mip]
 shodhan solve model.mps    # presolve + scaling, then reports NotImplemented
+shodhan factor-bench model.mps [--threshold u] [--max-updates k]
 shodhan --help
 shodhan --version
 ```
@@ -66,6 +69,11 @@ coefficient ratio before and after scaling, and the time taken.
 `solve` runs presolve and scaling and prints their statistics. If presolve alone proves the
 model infeasible or unbounded, or solves it completely, that is reported (exit code 0); otherwise
 it reports `NotImplemented` (exit code 2) because there is no LP engine yet. Nothing is faked.
+
+`factor-bench` builds a crash basis (structural columns in ascending nonzero-count order, logical
+columns substituted for any rank deficiency), factorizes it, prints the sizes, fill and pivot counts, runs
+50 random solves with sparse right-hand sides (counts per hypersparse/dense path and residuals) and a short
+Forrest-Tomlin run. It is a developer diagnostic, not a benchmark, and says nothing about solver performance.
 
 Exit codes: 0 ok, 1 usage, read or write error, 2 not implemented.
 
@@ -83,7 +91,10 @@ Exit codes: 0 ok, 1 usage, read or write error, 2 not implemented.
 | LP presolve: empty row/column, fixed column, singleton row, redundant row, forcing row, doubleton equation, dual fixing | implemented |
 | MIP-safe presolve (integer rounding and bound tightening) | implemented    |
 | Postsolve of primal values and duals (all reductions, including forcing rows) | implemented |
+| Sparse LU of simplex bases (singleton + Markowitz pivoting), FTRAN/BTRAN with a hypersparse path, basis repair | implemented |
+| Forrest-Tomlin basis update                          | implemented         |
 | `shodhan info`, `shodhan presolve`                   | implemented         |
+| `shodhan factor-bench` (developer diagnostic for the LU) | implemented     |
 | `shodhan solve`                                      | presolve + scaling, then `NotImplemented` |
 | QPS files (QUADOBJ / QMATRIX)                        | not yet implemented |
 | LP solver (simplex)                                  | not yet implemented |
@@ -106,7 +117,7 @@ SHODHAN is written from scratch. The only things it may use are:
 - later, the CUDA runtime.
 
 No third-party solver or numerical library is allowed. In particular: HiGHS,
-SCIP, CLP/CBC/COIN-OR, GLPK, OR-Tools, SuiteSparse (AMD/CHOLMOD/UMFPACK),
+SCIP, CLP/CBC/COIN-OR, GLPK, OR-Tools, SuiteSparse (AMD/CHOLMOD/UMFPACK/KLU/CSparse),
 Eigen, BLAS/LAPACK, cuDSS and cuSOLVER are forbidden. `scripts/check_deps.py`
 enforces this in CI, and also checks that test-only code (`tests/support/`) is not
 linked into `shodhan_core`.
@@ -116,6 +127,7 @@ linked into `shodhan_core`.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map,
 [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for the sign and scaling conventions,
 [docs/PRESOLVE.md](docs/PRESOLVE.md) for each reduction and its postsolve,
+[docs/LU.md](docs/LU.md) for the basis factorization and its update,
 [docs/MPS_FORMAT.md](docs/MPS_FORMAT.md) for the MPS conventions SHODHAN
 follows, and [data/README.md](data/README.md) for where to obtain benchmark
 instances (they are never committed).
