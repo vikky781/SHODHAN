@@ -9,6 +9,7 @@
 #include "factor_bench.hpp"
 #include "info.hpp"
 #include "presolve_report.hpp"
+#include "solve_command.hpp"
 #include "shodhan/kkt.hpp"
 #include "shodhan/mps.hpp"
 #include "shodhan/presolve.hpp"
@@ -19,7 +20,6 @@ namespace {
 
 constexpr int kExitOk = 0;
 constexpr int kExitUsage = 1;
-constexpr int kExitNotImplemented = 2;
 
 void print_usage(std::ostream& out) {
   out << "SHODHAN " << shodhan::kVersion << " - a from-scratch LP/MILP/QP optimization solver core\n"
@@ -32,12 +32,16 @@ void print_usage(std::ostream& out) {
       << "                             factorize a crash basis of the model and report LU\n"
       << "                             statistics, random solves and updates (developer\n"
       << "                             diagnostic, not a benchmark)\n"
-      << "  shodhan solve <file>       presolve and scale the model, then solve it\n"
-      << "                             (the solver itself is not implemented yet)\n"
+      << "  shodhan solve <file> [--no-presolve] [--no-scaling] [--no-perturb] [--time-limit s]\n"
+      << "                       [--iter-limit n] [--write-sol path] [--verbose]\n"
+      << "                             solve an LP (presolve, scaling, dual simplex, KKT check on\n"
+      << "                             the original model); models with integer columns are\n"
+      << "                             reported as not implemented\n"
       << "  shodhan --help             show this help\n"
       << "  shodhan --version          show the version\n"
       << "\n"
-      << "Exit codes: 0 ok, 1 usage, read or write error, 2 not implemented.\n";
+      << "Exit codes: 0 ok (optimal for solve), 1 usage, read or write error, 2 not implemented,\n"
+      << "            3 solve ended infeasible, unbounded, at a limit, or numerically.\n";
 }
 
 // Reads the model; on failure prints the error and returns false.
@@ -118,50 +122,12 @@ int run_presolve(const std::vector<std::string>& args) {
   return kExitOk;
 }
 
-int run_info_or_solve(const std::string& cmd, const std::vector<std::string>& args) {
-  if (args.size() != 2) return usage_error("'" + cmd + "' takes exactly one file argument");
+int run_info(const std::vector<std::string>& args) {
+  if (args.size() != 2) return usage_error("'info' takes exactly one file argument");
   shodhan::MpsReadResult read;
   if (!load(args[1], &read)) return kExitUsage;
   shodhan::cli::print_model_summary(read.model, read.warnings, std::cout);
-  if (cmd == "info") return kExitOk;
-
-  // ---- solve: presolve, scale, then (not yet) solve ----
-  const shodhan::PresolveOptions opt = shodhan::cli::presolve_options_for(read.model, true);
-  const shodhan::PresolveResult pre = shodhan::presolve(read.model, opt);
-  std::cout << "\n";
-  shodhan::cli::print_presolve_report(pre, std::cout);
-
-  switch (pre.status) {
-    case shodhan::PresolveStatus::Infeasible:
-      std::cout << "\nStatus: Infeasible (proven by presolve)\n";
-      return kExitOk;
-    case shodhan::PresolveStatus::Unbounded:
-      std::cout << "\nStatus: Unbounded (proven by presolve)\n";
-      return kExitOk;
-    case shodhan::PresolveStatus::InfeasibleOrUnbounded:
-      std::cout << "\nStatus: InfeasibleOrUnbounded (presolve found an improving ray but could not "
-                   "establish feasibility)\n";
-      return kExitOk;
-    case shodhan::PresolveStatus::SolvedByPresolve: {
-      const shodhan::Solution sol = shodhan::postsolve(pre.stack, shodhan::Solution{});
-      std::cout << "\nStatus: Optimal (solved by presolve)\n";
-      char buf[64];
-      std::snprintf(buf, sizeof(buf), "%.12g", sol.objective);
-      std::cout << "Objective: " << buf << "\n";
-      if (!opt.is_mip) {
-        const shodhan::KktReport k = shodhan::check_kkt(read.model, sol, 1e-9);
-        std::cout << "KKT check (tolerance 1e-9): " << (k.ok ? "passed" : "FAILED") << "\n";
-      }
-      return kExitOk;
-    }
-    case shodhan::PresolveStatus::Reduced:
-      break;
-  }
-  std::cout << "\n";
-  shodhan::cli::print_scaling_report(pre.reduced, std::cout);
-  std::cout << "\nStatus: " << shodhan::to_string(shodhan::Status::NotImplemented)
-            << " (the solver is not implemented yet; no solution is produced)\n";
-  return kExitNotImplemented;
+  return kExitOk;
 }
 
 int run(const std::vector<std::string>& args) {
@@ -178,7 +144,8 @@ int run(const std::vector<std::string>& args) {
     std::cout << "shodhan " << shodhan::kVersion << "\n";
     return kExitOk;
   }
-  if (cmd == "info" || cmd == "solve") return run_info_or_solve(cmd, args);
+  if (cmd == "info") return run_info(args);
+  if (cmd == "solve") return shodhan::cli::run_solve(args);
   if (cmd == "presolve") return run_presolve(args);
   if (cmd == "factor-bench") return shodhan::cli::run_factor_bench(args);
   return usage_error("unknown command '" + cmd + "'");

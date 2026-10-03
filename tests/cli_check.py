@@ -28,6 +28,10 @@ SOLVED_BY_PRESOLVE = (
     "NAME s\nROWS\n N COST\n G R1\nCOLUMNS\n X COST 1 R1 1\nRHS\n RHS R1 3\n"
     "BOUNDS\n FX BND X 3\nENDATA\n"
 )
+UNBOUNDED = (
+    "NAME unb\nROWS\n N COST\n L R1\nCOLUMNS\n X COST -1 R1 1\n Y COST -1 R1 -1\n"
+    "RHS\n RHS R1 2\nENDATA\n"
+)
 INFEASIBLE = (
     "NAME inf\nROWS\n N COST\n G R1\n L R2\nCOLUMNS\n X COST 1 R1 1\n X R2 1\n"
     "RHS\n RHS R1 5 R2 3\nENDATA\n"
@@ -113,8 +117,8 @@ def main():
         check("presolve can solve a model completely", rc == 0 and "SolvedByPresolve" in out, out)
         rc, out, _ = run(exe, "solve", solved)
         check("solve reports a model solved by presolve honestly",
-              rc == 0 and "Optimal (solved by presolve)" in out and "Objective: 3" in out
-              and "KKT check (tolerance 1e-9): passed" in out, out)
+              rc == 0 and "Status:        Optimal" in out and "Objective:     3" in out and "solved by presolve" in out
+              and "KKT check on the original model" in out and "passed" in out, out)
 
         infeasible = os.path.join(d, "infeasible.mps")
         with open(infeasible, "w") as f:
@@ -122,8 +126,34 @@ def main():
         rc, out, _ = run(exe, "presolve", infeasible)
         check("presolve reports an infeasible model", rc == 0 and "status:       Infeasible" in out, out)
         rc, out, _ = run(exe, "solve", infeasible)
-        check("solve reports an infeasible model proven by presolve",
-              rc == 0 and "Status: Infeasible (proven by presolve)" in out, out)
+        check("solve reports an infeasible model with a verified certificate and exit code 3",
+              rc == 3 and "Status:        Infeasible" in out and "Farkas multipliers verified" in out, repr((rc, out)))
+        rc, out, _ = run(exe, "solve", infeasible, "--no-presolve")
+        check("solve --no-presolve also proves infeasibility", rc == 3 and "Status:        Infeasible" in out and "Presolve:      off" in out, out)
+
+        unbounded = os.path.join(d, "unbounded.mps")
+        with open(unbounded, "w") as f:
+            f.write(UNBOUNDED)
+        rc, out, _ = run(exe, "solve", unbounded)
+        check("solve reports an unbounded model with a verified ray and exit code 3",
+              rc == 3 and "Status:        Unbounded" in out and "improving ray verified" in out, repr((rc, out)))
+        rc, out, _ = run(exe, "solve", unbounded, "--no-presolve", "--no-scaling")
+        check("solve --no-presolve --no-scaling also finds the unbounded ray",
+              rc == 3 and "Status:        Unbounded" in out and "Scaling:       off" in out, out)
+
+        sol = os.path.join(d, "tiny.sol")
+        rc, out, _ = run(exe, "solve", lp, "--write-sol", sol)
+        check("solve --write-sol writes the objective and the nonzero columns",
+              rc == 0 and os.path.exists(sol), out)
+        if os.path.exists(sol):
+            with open(sol) as f:
+                lines = f.read().splitlines()
+            check("the solution file starts with the objective line", lines and lines[0].startswith("objective "), repr(lines[:3]))
+            check("the solution file lists name value pairs",
+                  all(len(l.split()) == 2 for l in lines[1:]) and len(lines) >= 2, repr(lines))
+        rc, out, _ = run(exe, "solve", infeasible, "--write-sol", os.path.join(d, "none.sol"))
+        check("no solution file is written for an infeasible model",
+              rc == 3 and "Nothing written" in out and not os.path.exists(os.path.join(d, "none.sol")), out)
 
         rc, out, _ = run(exe, "presolve", infeasible, "--write-presolved", os.path.join(d, "none.mps"))
         check("nothing is written when presolve proves infeasibility",
@@ -140,9 +170,35 @@ def main():
 
     # ---- solve ----
     rc, out, _ = run(exe, "solve", lp)
-    check("solve on a reducible model exits 2 (not implemented)", rc == 2, repr(rc))
-    check("solve prints the summary, the presolve stats and the status",
-          "Rows:" in out and "Presolve" in out and "Scaling" in out and "NotImplemented" in out, out)
+    check("solve on an LP exits 0 with status Optimal", rc == 0 and "Status:        Optimal" in out, repr((rc, out)))
+    check("solve prints the summary, iterations, time and the KKT residuals",
+          "Rows:" in out and "Iterations:" in out and "Time:" in out and "primal infeasibility" in out
+          and "duality gap" in out and "passed" in out, out)
+    check("solve reports the objective of the maximization model", "Objective:     94" in out, out)
+    for flags in (["--no-presolve"], ["--no-scaling"], ["--no-perturb"], ["--no-presolve", "--no-scaling", "--no-perturb"],
+                  ["--verbose"], ["--time-limit", "30", "--iter-limit", "1000"]):
+        rc, out, _ = run(exe, "solve", lp, *flags)
+        check("solve " + " ".join(flags) + " gives the same objective", rc == 0 and "Objective:     94" in out, repr((rc, out[-200:])))
+    rc, out, _ = run(exe, "solve", lp, "--time-limit", "0", "--no-presolve")
+    check("solve --time-limit 0 reports TimeLimit with exit code 3", rc == 3 and "Status:        TimeLimit" in out, repr((rc, out)))
+    rc, out, _ = run(exe, "solve", lp, "--iter-limit", "0", "--no-presolve")
+    check("solve --iter-limit 0 reports IterationLimit with exit code 3 or solves trivially",
+          (rc == 3 and "IterationLimit" in out) or (rc == 0 and "Optimal" in out), repr((rc, out)))
+    rc, out, _ = run(exe, "solve", mip)
+    check("solve on a model with integer columns exits 2 (not implemented) after printing the summary",
+          rc == 2 and "Rows:" in out and "NotImplemented" in out and "integer columns" in out, repr((rc, out)))
+    rc, _, err = run(exe, "solve")
+    check("solve without file is a usage error (1)", rc == 1, err)
+    rc, _, err = run(exe, "solve", lp, "--time-limit")
+    check("solve --time-limit without a value is a usage error (1)", rc == 1, err)
+    rc, _, err = run(exe, "solve", lp, "--time-limit", "abc")
+    check("solve --time-limit abc is a usage error (1)", rc == 1, err)
+    rc, _, err = run(exe, "solve", lp, "--iter-limit", "1.5")
+    check("solve --iter-limit 1.5 is a usage error (1)", rc == 1, err)
+    rc, _, err = run(exe, "solve", lp, "--bogus")
+    check("solve with an unknown option is a usage error (1)", rc == 1 and "unknown option" in err, err)
+    rc, _, err = run(exe, "solve", lp, "--write-sol")
+    check("solve --write-sol without a path is a usage error (1)", rc == 1, err)
 
     rc, _, err = run(exe, "info", os.path.join(models, "does_not_exist.mps"))
     check("missing file is a read error (1)", rc == 1 and "error" in err, repr((rc, err)))
