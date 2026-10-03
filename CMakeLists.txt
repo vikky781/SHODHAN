@@ -73,6 +73,13 @@ if(SHODHAN_BUILD_TESTS)
   shodhan_configure_target(shodhan_tests)
   add_test(NAME shodhan_tests COMMAND shodhan_tests)
 
+  # Corpus generator for the KASAUTI integration test (writes models and certificates into a directory).
+  add_executable(shodhan_cert_corpus tests/corpus/cert_corpus.cpp tests/support/lp_families.cpp tests/support/random_lp.cpp
+                 tests/support/simplex_lps.cpp)
+  target_link_libraries(shodhan_cert_corpus PRIVATE shodhan_core)
+  target_include_directories(shodhan_cert_corpus PRIVATE tests src)
+  shodhan_configure_target(shodhan_cert_corpus)
+
   if(SHODHAN_CLI_SOURCES)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
