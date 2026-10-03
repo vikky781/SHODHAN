@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kasauti"
+version = "0.1.0"
+description = "Independent exact-arithmetic verifier for SHODHAN LP certificates (standard library only)"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+kasauti = "kasauti.cli:main"
+
+[tool.setuptools]
+packages = ["kasauti"]
