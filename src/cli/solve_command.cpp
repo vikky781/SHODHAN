@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "cert_output.hpp"
 #include "info.hpp"
 #include "shodhan/lp_solver.hpp"
 #include "shodhan/mps.hpp"
@@ -26,7 +27,7 @@ constexpr int kExitStatus = 3;
 int usage_error(const std::string& message) {
   std::cerr << "error: " << message << "\n";
   std::cerr << "usage: shodhan solve <file> [--no-presolve] [--no-scaling] [--no-perturb] [--time-limit seconds]\n"
-               "                     [--iter-limit n] [--write-sol path] [--verbose]\n";
+               "                     [--iter-limit n] [--write-sol path] [--write-cert path] [--verbose]\n";
   return kExitUsage;
 }
 
@@ -60,7 +61,7 @@ bool has_integer_columns(const LpModel& m) {
 }  // namespace
 
 int run_solve(const std::vector<std::string>& args) {
-  std::string path, sol_path;
+  std::string path, sol_path, cert_path;
   LpOptions opt;
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
@@ -84,6 +85,9 @@ int run_solve(const std::vector<std::string>& args) {
         opt.iteration_limit = static_cast<long long>(v);
       }
       ++i;
+    } else if (a == "--write-cert") {
+      if (i + 1 >= args.size()) return usage_error("--write-cert needs a file name");
+      cert_path = args[++i];
     } else if (a == "--write-sol") {
       if (i + 1 >= args.size()) return usage_error("--write-sol needs a file name");
       sol_path = args[++i];
@@ -110,6 +114,11 @@ int run_solve(const std::vector<std::string>& args) {
   if (has_integer_columns(model)) {
     std::cout << "Status: " << to_string(Status::NotImplemented)
               << " (the model has integer columns; branch and bound is not implemented yet, no solution is produced)\n";
+    if (!cert_path.empty()) {
+      LpResult none;  // no certificate exists for an unsolved model: write the honest "other" one
+      none.status = Status::NotImplemented;
+      if (!write_certificate_output(model, path, opt, none, cert_path)) return kExitUsage;
+    }
     return kExitNotImplemented;
   }
 
@@ -178,6 +187,7 @@ int run_solve(const std::vector<std::string>& args) {
       std::cout << "Wrote the solution to " << sol_path << "\n";
     }
   }
+  if (!cert_path.empty() && !write_certificate_output(model, path, opt, r, cert_path)) return kExitUsage;
   return r.status == Status::Optimal ? kExitOk : kExitStatus;
 }
 

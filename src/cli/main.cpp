@@ -33,7 +33,7 @@ void print_usage(std::ostream& out) {
       << "                             statistics, random solves and updates (developer\n"
       << "                             diagnostic, not a benchmark)\n"
       << "  shodhan solve <file> [--no-presolve] [--no-scaling] [--no-perturb] [--time-limit s]\n"
-      << "                       [--iter-limit n] [--write-sol path] [--verbose]\n"
+      << "                       [--iter-limit n] [--write-sol path] [--write-cert path] [--verbose]\n"
       << "                             solve an LP (presolve, scaling, dual simplex, KKT check on\n"
       << "                             the original model); models with integer columns are\n"
       << "                             reported as not implemented\n"

@@ -1,0 +1,137 @@
+#include "shodhan/certificate.hpp"
+
+#include <fstream>
+#include <ostream>
+
+#include "shodhan/json_writer.hpp"
+
+namespace shodhan {
+
+namespace {
+
+std::string row_name(const LpModel& m, Index i) {
+  return m.row_names.empty() ? "R" + std::to_string(i + 1) : m.row_names[to_size(i)];
+}
+
+std::string col_name(const LpModel& m, Index j) {
+  return m.col_names.empty() ? "C" + std::to_string(j + 1) : m.col_names[to_size(j)];
+}
+
+template <typename NameFn>
+void write_sparse(JsonWriter& w, const std::vector<double>& v, NameFn name) {
+  w.begin_object();
+  for (std::size_t k = 0; k < v.size(); ++k) {
+    if (v[k] != 0.0) {
+      w.key(name(static_cast<Index>(k)));
+      w.value(v[k]);
+    }
+  }
+  w.end_object();
+}
+
+}  // namespace
+
+std::string certificate_status(const LpResult& r) {
+  switch (r.status) {
+    case Status::Optimal: return "optimal";
+    case Status::Infeasible: return r.farkas_ray.empty() ? "other" : "infeasible";
+    case Status::Unbounded: return r.unbounded_ray.empty() || r.unbounded_point.empty() ? "other" : "unbounded";
+    default: return "other";
+  }
+}
+
+void write_certificate(const LpModel& model, const CertificateContext& ctx, const LpResult& r, std::ostream& out) {
+  const std::string status = certificate_status(r);
+  std::size_t n_integer = 0;
+  for (const ColType t : model.col_type) n_integer += t != ColType::Continuous ? 1 : 0;
+
+  JsonWriter w(out);
+  w.begin_object();
+  w.key("format");
+  w.value("shodhan-cert");
+  w.key("version");
+  w.value(1);
+  w.key("solver");
+  w.begin_object();
+  w.key("name");
+  w.value(ctx.solver_name);
+  w.key("version");
+  w.value(ctx.solver_version);
+  w.end_object();
+  w.key("problem");
+  w.begin_object();
+  w.key("name");
+  w.value(ctx.problem_name);
+  w.key("file_sha256");
+  w.value(ctx.file_sha256);
+  w.key("rows");
+  w.value(static_cast<long long>(model.n_rows));
+  w.key("cols");
+  w.value(static_cast<long long>(model.n_cols));
+  w.key("nnz");
+  w.value(static_cast<unsigned long long>(model.A.nnz()));
+  w.key("sense");
+  w.value(model.sense == Sense::Maximize ? "max" : "min");
+  w.key("n_integer");
+  w.value(static_cast<unsigned long long>(n_integer));
+  w.end_object();
+  w.key("status");
+  w.value(status);
+  if (status == "optimal") {
+    w.key("claimed_objective");
+    w.value(r.solution.objective);
+  }
+  w.key("tolerances");
+  w.begin_object();
+  w.key("primal_tol");
+  w.value(ctx.options.params.primal_tol);
+  w.key("dual_tol");
+  w.value(ctx.options.params.dual_tol);
+  w.key("kkt_tol");
+  w.value(ctx.options.kkt_tol);
+  w.end_object();
+  w.key("attempts");
+  w.begin_object();
+  w.key("count");
+  w.value(r.attempts);
+  w.key("configuration");
+  w.value(r.configuration);
+  w.end_object();
+  if (status == "optimal") {
+    w.key("x");
+    write_sparse(w, r.solution.x, [&](Index j) { return col_name(model, j); });
+    w.key("y");
+    write_sparse(w, r.solution.y, [&](Index i) { return row_name(model, i); });
+  } else if (status == "infeasible") {
+    w.key("farkas");
+    w.begin_object();
+    w.key("y");
+    write_sparse(w, r.farkas_ray, [&](Index i) { return row_name(model, i); });
+    w.end_object();
+  } else if (status == "unbounded") {
+    w.key("point");
+    write_sparse(w, r.unbounded_point, [&](Index j) { return col_name(model, j); });
+    w.key("ray");
+    write_sparse(w, r.unbounded_ray, [&](Index j) { return col_name(model, j); });
+  }
+  w.end_object();
+  out << '\n';
+}
+
+bool write_certificate_file(const LpModel& model, const CertificateContext& ctx, const LpResult& r, const std::string& path,
+                            std::string* error) {
+  std::ofstream out(path, std::ios::binary);
+  if (!out) {
+    if (error != nullptr) *error = "cannot open '" + path + "' for writing";
+    return false;
+  }
+  write_certificate(model, ctx, r, out);
+  out.close();
+  if (!out) {
+    if (error != nullptr) *error = "error while writing '" + path + "'";
+    return false;
+  }
+  return true;
+}
+
+}  // namespace shodhan
