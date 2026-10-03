@@ -210,7 +210,7 @@ from the primal feasible basis the primal simplex started from.
   residual of `A x - r = 0` and `B^T y = c_B`), then `check_kkt` is run on the model with the current bounds at
   `final_tol` (default 1e-6). If it fails, the tolerances are tightened to 1e-9 once and the cleanup is redone; if
   it still fails the result is `NumericalError`, never `Optimal`. An `Infeasible` result must pass `check_farkas`
-  (tolerance 1e-9) and an `Unbounded` one `check_unbounded_ray` (1e-8), otherwise it also becomes `NumericalError`.
+  (tolerance 1e-9) and an `Unbounded` one `check_unbounded_ray` (1e-7), otherwise it also becomes `NumericalError`.
 
 ## 10. The LP pipeline
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace shodhan {
 
@@ -105,11 +106,22 @@ RayCheck check_unbounded_ray(const LpModel& model, const std::vector<double>& ra
       mag[i] += std::fabs(model.A.value[to_size(t)] * v);
     }
   }
+  // Row violations are measured against the magnitude of the terms of the row, but at least 1e-6 of
+  // the largest contribution the row could have (max|ray| * max|a_ij|): where a row's terms cancel to
+  // noise, noise divided by noise would otherwise read as a total violation.
+  std::vector<double> row_max(to_size(model.n_rows), 0.0);
+  for (Index j = 0; j < model.n_cols; ++j) {
+    for (Index t = model.A.col_start[to_size(j)]; t < model.A.col_start[to_size(j) + 1]; ++t) {
+      const std::size_t i = to_size(model.A.row_index[to_size(t)]);
+      row_max[i] = std::max(row_max[i], std::fabs(model.A.value[to_size(t)]));
+    }
+  }
   double row_worst = 0.0;
   for (Index i = 0; i < model.n_rows; ++i) {
     const std::size_t k = to_size(i);
-    const double rel = ar[k] / std::max(mag[k], 1e-300);
-    if (mag[k] == 0.0) continue;
+    const double denom = std::max(mag[k], 1e-6 * rmax * row_max[k]);
+    const double rel = ar[k] / std::max(denom, 1e-300);
+    if (denom == 0.0) continue;
     if (ar[k] > 0.0 && !is_inf(model.row_upper[k])) row_worst = std::max(row_worst, rel);
     if (ar[k] < 0.0 && !is_inf(model.row_lower[k])) row_worst = std::max(row_worst, -rel);
   }
@@ -123,7 +135,7 @@ RayCheck check_unbounded_ray(const LpModel& model, const std::vector<double>& ra
   if (worst > tol * rmax) {
     r.message = "the ray leaves a finite column bound (violation " + std::to_string(worst) + ")";
   } else if (row_worst > tol) {
-    r.message = "A * ray leaves a finite row bound (relative violation " + std::to_string(row_worst) + ")";
+    r.message = "A * ray leaves a finite row bound (relative violation " + std::to_string(row_worst) + " (" + [&]{ char b[32]; std::snprintf(b, sizeof b, "%.3e", row_worst); return std::string(b); }() + ")" + ")";
   } else if (!(rate < -tol * std::max(rate_mag, 1e-300))) {
     r.message = "the objective does not improve along the ray (rate " + std::to_string(rate) + ")";
   } else {

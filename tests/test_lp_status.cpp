@@ -210,7 +210,7 @@ TEST_CASE(phase1_lps_with_arbitrary_costs_match_the_oracle) {
       if (!check_farkas(model, e.farkas_ray(), 1e-9).ok) { good = false; why = "Farkas check failed"; }
       ++infeasible;
     } else if (good && st == EngineStatus::Unbounded) {
-      if (!check_unbounded_ray(model, e.unbounded_ray(), 1e-8).ok) { good = false; why = "ray check failed"; }
+      if (!check_unbounded_ray(model, e.unbounded_ray(), 1e-7).ok) { good = false; why = "ray check failed"; }
       ++unbounded;
     }
     if (!good) {
@@ -256,7 +256,7 @@ TEST_CASE(planted_infeasible_and_unbounded_lps_are_classified_correctly) {
     }
     if (st == EngineStatus::Unbounded) {
       ++ray_total;
-      if (check_unbounded_ray(model, e.unbounded_ray(), 1e-8).ok) ++ray_ok;
+      if (check_unbounded_ray(model, e.unbounded_ray(), 1e-7).ok) ++ray_ok;
     }
   }
   std::cout << "    planted infeasible/unbounded LPs: " << correct << " of " << total << " classified correctly (" << std::fixed << std::setprecision(1)

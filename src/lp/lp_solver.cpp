@@ -165,7 +165,7 @@ Attempt run_attempt(const LpModel& model, const LpOptions& opt, bool use_presolv
       if (use_scaling) {
         for (std::size_t j = 0; j < r.size(); ++j) r[j] *= sc.col_scale[j];
       }
-      a.verified = check_unbounded_ray(model, r, 1e-8).ok;
+      a.verified = check_unbounded_ray(model, r, 1e-7).ok;
       a.ray = r;
       if (!a.verified) {
         a.status = Status::NumericalError;

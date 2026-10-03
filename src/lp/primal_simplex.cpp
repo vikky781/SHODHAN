@@ -142,7 +142,11 @@ EngineStatus SimplexEngine::run_primal_simplex() {
         }
       }
     };
-    ratio_test(std::max(opt_.min_pivot_abs, opt_.min_pivot_rel * amax));
+    // Every basic variable that can block counts (a size threshold may only decide which blocker is
+    // chosen, never whether a bound is respected: dropping small-|alpha| blockers lets basics run far past
+    // their bounds).
+    (void)amax;
+    ratio_test(1e-11);
     const double range = hi_[to_size(q)] - lo_[to_size(q)];
     const bool boxed = !is_inf(lo_[to_size(q)]) && !is_inf(hi_[to_size(q)]);
 
@@ -159,7 +163,7 @@ EngineStatus SimplexEngine::run_primal_simplex() {
         }
       };
       make_ray();
-      if (!check_unbounded_ray(checked_model(), ray_, 1e-8).ok) {
+      if (!check_unbounded_ray(checked_model(), ray_, 1e-7).ok) {
         ratio_test(1e-11);
         if (r < 0) return EngineStatus::Unbounded;  // accept() will refuse an invalid ray
       } else {

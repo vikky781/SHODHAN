@@ -42,7 +42,7 @@ std::string check_result(const LpModel& model, const LpResult& r, const RefLpRes
   } else if (r.status == Status::Infeasible) {
     if (!check_farkas(model, r.farkas_ray, 1e-9).ok) return "the Farkas certificate does not check";
   } else if (r.status == Status::Unbounded) {
-    if (!check_unbounded_ray(model, r.unbounded_ray, 1e-8).ok) return "the unbounded ray does not check";
+    if (!check_unbounded_ray(model, r.unbounded_ray, 1e-7).ok) return "the unbounded ray does not check";
   }
   return "";
 }

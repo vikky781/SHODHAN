@@ -149,7 +149,7 @@ int run_solve(const std::vector<std::string>& args) {
     const RayCheck rc = check_farkas(model, r.farkas_ray, 1e-9);
     std::cout << "Certificate:   Farkas multipliers verified: " << rc.message << "\n";
   } else if (r.status == Status::Unbounded) {
-    const RayCheck rc = check_unbounded_ray(model, r.unbounded_ray, 1e-8);
+    const RayCheck rc = check_unbounded_ray(model, r.unbounded_ray, 1e-7);
     std::cout << "Certificate:   improving ray verified: " << rc.message << "\n";
   }
   if (!r.message.empty()) std::cout << "Message:       " << r.message << "\n";

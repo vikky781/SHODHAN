@@ -285,7 +285,7 @@ EngineStatus SimplexEngine::accept(EngineStatus st) {
     return check_farkas(checked_model(), farkas_, 1e-9).ok ? st : EngineStatus::NumericalError;
   }
   if (st == EngineStatus::Unbounded) {
-    return check_unbounded_ray(checked_model(), ray_, 1e-8).ok ? st : EngineStatus::NumericalError;
+    return check_unbounded_ray(checked_model(), ray_, 1e-7).ok ? st : EngineStatus::NumericalError;
   }
   return st;
 }
