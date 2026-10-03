@@ -89,6 +89,35 @@ if(SHODHAN_BUILD_TESTS)
     else()
       message(STATUS "Python3 not found: CLI end-to-end test disabled")
     endif()
+
+    # KASAUTI, the independent verifier (verify/, standard-library Python): its unit tests, the differential
+    # parser test, and the integration test that solves a seeded corpus, writes certificates and verifies
+    # every one in exact AND float mode, followed by the mutation tests on the same corpus.
+    if(Python3_Interpreter_FOUND)
+      set(KASAUTI_CORPUS_DIR ${CMAKE_CURRENT_BINARY_DIR}/kasauti_corpus)
+      set(KASAUTI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/verify)
+      add_test(NAME kasauti_corpus_setup
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${KASAUTI_CORPUS_DIR})
+      add_test(NAME kasauti_corpus_generate COMMAND shodhan_cert_corpus ${KASAUTI_CORPUS_DIR} 60)
+      set_tests_properties(kasauti_corpus_setup PROPERTIES FIXTURES_SETUP kasauti_dir)
+      set_tests_properties(kasauti_corpus_generate PROPERTIES FIXTURES_REQUIRED kasauti_dir FIXTURES_SETUP kasauti_corpus)
+      add_test(NAME kasauti_unittests
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -t .
+        WORKING_DIRECTORY ${KASAUTI_DIR})
+      set_tests_properties(kasauti_unittests PROPERTIES ENVIRONMENT "SHODHAN_EXE=$<TARGET_FILE:shodhan>")
+      add_test(NAME kasauti_corpus_check
+        COMMAND ${Python3_EXECUTABLE} ${KASAUTI_DIR}/tests/corpus_check.py ${KASAUTI_CORPUS_DIR})
+      set_tests_properties(kasauti_corpus_check PROPERTIES FIXTURES_REQUIRED kasauti_corpus)
+      add_test(NAME kasauti_mutations
+        COMMAND ${Python3_EXECUTABLE} -m unittest tests.test_mutations
+        WORKING_DIRECTORY ${KASAUTI_DIR})
+      set_tests_properties(kasauti_mutations PROPERTIES FIXTURES_REQUIRED kasauti_corpus
+                           ENVIRONMENT "KASAUTI_CORPUS=${KASAUTI_CORPUS_DIR}")
+    else()
+      # A visible skip, not a silent pass.
+      add_test(NAME kasauti_skipped COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: Python 3 not found, KASAUTI tests not run")
+      set_tests_properties(kasauti_skipped PROPERTIES SKIP_REGULAR_EXPRESSION "SKIPPED")
+    endif()
   endif()
 endif()
 
