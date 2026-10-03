@@ -123,3 +123,45 @@ TEST_CASE(lu_structure_markowitz_search_parameter_is_accepted) {
     CHECK_EQ(f.params().markowitz_search, search);
   }
 }
+
+TEST_CASE(lu_structure_growth_indicator) {
+  // Identity: no growth, every pivot is as large as its column.
+  std::vector<Triplet> t;
+  for (Index i = 0; i < 4; ++i) t.push_back({i, i, 2.0});
+  const SparseMatrix I = make_matrix(4, 4, t);
+  BasisFactor f;
+  REQUIRE(f.factorize(I, {0, 1, 2, 3}) == FactorStatus::Ok);
+  FactorStats s = f.stats();
+  CHECK_NEAR(s.max_abs_basis, 2.0, 0.0);
+  CHECK_NEAR(s.max_abs_u, 2.0, 0.0);
+  CHECK_NEAR(s.growth, 1.0, 1e-15);
+  CHECK_NEAR(s.min_pivot_ratio, 1.0, 1e-15);
+  // Upper triangular with a large off-diagonal: U holds the entry, so growth is large
+  // and the pivot of the second column is small relative to its column maximum.
+  const SparseMatrix U = make_matrix(2, 2, {{0, 0, 1.0}, {0, 1, 100.0}, {1, 1, 0.5}});
+  REQUIRE(f.factorize(U, {0, 1}) == FactorStatus::Ok);
+  s = f.stats();
+  CHECK_NEAR(s.max_abs_basis, 100.0, 0.0);
+  CHECK_NEAR(s.max_abs_u, 100.0, 0.0);
+  CHECK_NEAR(s.growth, 1.0, 1e-15);
+  CHECK_NEAR(s.min_pivot_ratio, 0.005, 1e-15);
+  // An empty basis has no indicator.
+  const SparseMatrix E = make_matrix(0, 0, {});
+  REQUIRE(f.factorize(E, {}) == FactorStatus::Ok);
+  CHECK_NEAR(f.stats().growth, 0.0, 0.0);
+}
+
+TEST_CASE(lu_structure_growth_indicator_follows_updates) {
+  // B = I; the entering column (1, 1e3) replaces position 0: U gets the entry 1e3.
+  const SparseMatrix A = make_matrix(2, 3, {{0, 0, 1.0}, {1, 1, 1.0}, {0, 2, 1.0}, {1, 2, 1000.0}});
+  BasisFactor f;
+  REQUIRE(f.factorize(A, {0, 1}) == FactorStatus::Ok);
+  CHECK_NEAR(f.stats().max_abs_u, 1.0, 0.0);
+  SparseWork w(2);
+  w.set(0, 1.0);
+  w.set(1, 1000.0);
+  f.ftran(w, true);
+  REQUIRE(f.update(1) == FactorStatus::Ok);
+  CHECK(f.stats().max_abs_u >= 1000.0);
+  CHECK(f.stats().growth >= 1000.0 - 1e-9);
+}

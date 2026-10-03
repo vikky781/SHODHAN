@@ -131,6 +131,9 @@ void BasisFactor::install(LuEliminator& e) {
   n_col_singletons_ = e.n_col_singletons;
   n_row_singletons_ = e.n_row_singletons;
   n_markowitz_ = e.n_markowitz;
+  max_abs_basis_ = e.max_abs_basis;
+  max_abs_u_ = e.max_abs_u;
+  min_pivot_ratio_ = sm == 0 ? 0.0 : e.min_rel_pivot;
 
   // Work buffers.
   if (scratch_.size() != m_) {
@@ -178,6 +181,10 @@ FactorStats BasisFactor::stats() const {
   s.btran_calls = btran_calls_;
   s.hyper_solves = hyper_solves_;
   s.dense_solves = dense_solves_;
+  s.max_abs_basis = max_abs_basis_;
+  s.max_abs_u = max_abs_u_;
+  s.growth = max_abs_basis_ > 0.0 ? max_abs_u_ / max_abs_basis_ : 0.0;
+  s.min_pivot_ratio = min_pivot_ratio_;
   return s;
 }
 

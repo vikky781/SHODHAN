@@ -42,6 +42,11 @@ class LuEliminator {
   Index n_col_singletons = 0;
   Index n_row_singletons = 0;
   Index n_markowitz = 0;
+  /// Largest magnitude in the basis matrix, largest magnitude of a U entry
+  /// (including pivots) and smallest |pivot| / original column maximum.
+  double max_abs_basis = 0.0;
+  double max_abs_u = 0.0;
+  double min_rel_pivot = 0.0;
 
  private:
   struct Buckets {

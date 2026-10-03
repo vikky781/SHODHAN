@@ -104,6 +104,9 @@ LuEliminator::LuEliminator(const FactorParams& params, const SparseMatrix& A,
     }
   }
 
+  for (std::size_t p = 0; p < sm; ++p) max_abs_basis = std::max(max_abs_basis, col_orig_max_[p]);
+  min_rel_pivot = std::numeric_limits<double>::infinity();
+
   col_b_.init(m, m);
   row_b_.init(m, m);
   col_done_.assign(sm, 0);
@@ -339,6 +342,8 @@ void LuEliminator::pivot(const Candidate& cand) {
   piv_row.push_back(r);
   piv_pos.push_back(c);
   piv_val.push_back(piv);
+  max_abs_u = std::max(max_abs_u, std::fabs(piv));
+  min_rel_pivot = std::min(min_rel_pivot, std::fabs(piv) / col_orig_max_[to_size(c)]);
 
   // Row r becomes a row of U; the columns it touches are updated.
   const auto rp = rows_.indices(r);
@@ -350,6 +355,7 @@ void LuEliminator::pivot(const Candidate& cand) {
     cols_.erase(j, pos);
     u_pos.push_back(j);
     u_val.push_back(arj);
+    max_abs_u = std::max(max_abs_u, std::fabs(arj));
     if (!mult_row_.empty()) eliminate_column(j, arj);
     touch_col(j);
   }

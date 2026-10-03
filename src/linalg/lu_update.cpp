@@ -118,6 +118,11 @@ FactorStatus BasisFactor::update(Index leaving_position) {
     ++added;
   }
   nnz_u_ = nnz_u_ + added - removed;
+  max_abs_u_ = std::max(max_abs_u_, std::fabs(new_diag));
+  for (const Index row : spike_.indices()) {
+    if (row != r0) max_abs_u_ = std::max(max_abs_u_, std::fabs(spike_[row]));
+  }
+  min_pivot_ratio_ = std::min(min_pivot_ratio_, std::fabs(new_diag) / std::max(max_abs_basis_, 1e-300));
 
   // Move the pivot to the end of the order.
   row_of_slot_[to_size(slot_of_row_[to_size(r0)])] = -1;

@@ -85,6 +85,15 @@ struct FactorStats {
   /// btran runs two such solves (L and U).
   std::size_t hyper_solves = 0;
   std::size_t dense_solves = 0;
+  /// Growth indicators (see docs/LU.md): largest magnitude in B, largest
+  /// magnitude in U (pivots and off-diagonals, including entries added by
+  /// updates), their ratio, and the smallest |pivot| relative to the largest
+  /// original magnitude of its column. A large growth or a tiny pivot ratio
+  /// warns of a badly conditioned basis; they are indicators, not bounds.
+  double max_abs_basis = 0.0;
+  double max_abs_u = 0.0;
+  double growth = 0.0;  ///< max_abs_u / max_abs_basis (0 for an empty basis)
+  double min_pivot_ratio = 0.0;
 };
 
 /// All integer and floating-point state of a factorization, flattened in a
@@ -234,6 +243,9 @@ class BasisFactor {
   Index n_col_singletons_ = 0;
   Index n_row_singletons_ = 0;
   Index n_markowitz_ = 0;
+  double max_abs_basis_ = 0.0;
+  double max_abs_u_ = 0.0;
+  double min_pivot_ratio_ = 0.0;
 
   // Saved by ftran(save_spike = true).
   bool spike_valid_ = false;

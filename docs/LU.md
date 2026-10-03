@@ -206,6 +206,15 @@ stays valid until it is consumed by a successful update, replaced by another `ft
 | `update_pivot_tol` | 1e-11 (target) | smallest acceptable new diagonal / pivot element |
 | `hyper_threshold` | 0.10 (target) | density below which a stage runs hypersparse |
 
+### Growth indicators
+
+`FactorStats` carries `max_abs_basis` (largest magnitude in `B`), `max_abs_u` (largest magnitude of a pivot or
+off-diagonal of `U`, including entries added by updates), `growth = max_abs_u / max_abs_basis`, and
+`min_pivot_ratio` (smallest `|pivot|` divided by the largest original magnitude of its column; after an update
+the new diagonal is divided by `max_abs_basis` instead, which can only make the ratio smaller). They are
+indicators for the caller, which can refactorize or distrust the basis when growth is large or the ratio tiny.
+They are not condition numbers: a triangular basis can be badly conditioned with growth 1.
+
 ## 7. Failure modes and limits
 
 - **Borderline rank.** For a basis that is numerically within rounding of singular, "the rank" is
