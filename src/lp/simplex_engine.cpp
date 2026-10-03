@@ -136,10 +136,12 @@ bool SimplexEngine::set_basis(const std::vector<Index>& basis) {
     }
   }
   sync_nonbasic_values();
+  const int repairs_before = stats_.basis_repairs;
   const bool ok = refactor(true);
   if (ok) {
     compute_primal();
     compute_dual();
+    if (stats_.basis_repairs == repairs_before) compute_exact_weights();
   }
   return ok;
 }

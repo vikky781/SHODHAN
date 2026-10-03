@@ -130,6 +130,12 @@ class SimplexEngine {
   /// are adjusted). Pricing weights are reset to 1 only after a repair or when
   /// reset_weights is true. Returns false if the factorization is unusable.
   bool refactor(bool reset_weights = false);
+  /// Dual steepest edge weights ||e_i^T B^-1||^2 computed exactly (one btran per
+  /// row). Used for a non-slack start basis; after a basis repair the weights
+  /// stay at 1 (an approximation, weights_exact() is false).
+  void compute_exact_weights();
+  const std::vector<double>& weights() const { return weights_; }
+  bool weights_exact() const { return weights_exact_; }
   /// x_B from the nonbasic values by one ftran.
   void compute_primal();
   /// y (btran of the basic costs) and d = c - A^T y for all variables.
