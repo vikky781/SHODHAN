@@ -80,6 +80,23 @@ void write_certificate(const LpModel& model, const CertificateContext& ctx, cons
   if (status == "optimal") {
     w.key("claimed_objective");
     w.value(r.solution.objective);
+    // The pipeline's own weak-duality bound of the multipliers: rigorous only if no tiny multiplier had to be
+    // treated as zero. A claim, not evidence: the verifier recomputes everything.
+    w.key("dual_bound");
+    w.begin_object();
+    w.key("rigorous");
+    w.value(r.rigorous);
+    w.key("available");
+    w.value(r.dual_bound.finite);
+    if (r.dual_bound.finite) {
+      w.key("value");
+      w.value(r.dual_bound.bound);
+      w.key("dropped");
+      w.value(static_cast<long long>(r.dual_bound.dropped));
+      w.key("gap_rel");
+      w.value(r.dual_bound.gap_rel);
+    }
+    w.end_object();
   }
   w.key("tolerances");
   w.begin_object();

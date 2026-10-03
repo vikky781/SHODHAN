@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "shodhan/dual_bound.hpp"
 #include "shodhan/kkt.hpp"
 #include "shodhan/lp_model.hpp"
 #include "shodhan/params.hpp"
@@ -35,6 +36,11 @@ struct LpResult {
   /// sense. Filled for Optimal.
   Solution solution;
   KktReport kkt;  ///< check on the original model (Optimal)
+  /// Weak-duality bound of the multipliers on the original model (Optimal); the answer was accepted only if
+  /// its gap to the objective is within the KKT tolerance. `dual_bound.rigorous` is false when tiny
+  /// multipliers had to be treated as zero (tolerance-checked, not a proof).
+  DualBound dual_bound;
+  bool rigorous = false;  ///< == dual_bound.rigorous
 
   long long iterations = 0;
   long long phase1_iterations = 0;

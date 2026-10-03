@@ -25,6 +25,7 @@ struct Attempt {
   bool needs_confirm = false;   // a status that cannot be certified in this configuration (presolve involved)
   Solution solution;
   KktReport kkt;
+  DualBound bound;
   std::vector<double> farkas, ray, point;
   long long iterations = 0, phase1 = 0, primal = 0;
   int refactors = 0;
@@ -35,6 +36,24 @@ struct Attempt {
   std::string note;             // what presolve concluded
   std::string message;
 };
+
+// Final acceptance of an optimal answer on the ORIGINAL model: the KKT check, and, when the multipliers give a
+// weak-duality bound (strictly, or tolerance-level after dropping multipliers below kDualZeroTol of their
+// scale), that bound must support the objective. A strict bound of -infinity (float multipliers that are
+// zero in theory but tiny in fact) does not reject the answer, and neither does the absence of any bound:
+// KKT already limits the dual infeasibility, and the result is then recorded as not rigorous with no bound.
+void accept_optimal(Attempt& a, const LpModel& model, double kkt_tol) {
+  a.kkt = check_kkt(model, a.solution, kkt_tol);
+  a.bound = compute_dual_bound(model, a.solution.x, a.solution.y, a.solution.objective, kkt_tol);
+  const bool bound_vetoes = a.bound.finite && !a.bound.gap_ok;
+  a.verified = a.kkt.ok && !bound_vetoes;
+  a.status = a.verified ? Status::Optimal : Status::NumericalError;
+  if (!a.kkt.ok) {
+    a.message = "the solution failed the KKT check on the original model: " + a.kkt.summary();
+  } else if (bound_vetoes) {
+    a.message = "the dual bound of the multipliers misses the objective by a relative " + std::to_string(a.bound.gap_rel);
+  }
+}
 
 Status to_lp_status(EngineStatus s) {
   switch (s) {
@@ -80,11 +99,8 @@ Attempt run_attempt(const LpModel& model, const LpOptions& opt, bool use_presolv
         return a;
       case PresolveStatus::SolvedByPresolve:
         a.solution = postsolve(pre.stack, Solution{});
-        a.kkt = check_kkt(model, a.solution, opt.kkt_tol);
-        a.status = a.kkt.ok ? Status::Optimal : Status::NumericalError;
-        a.verified = a.kkt.ok;
+        accept_optimal(a, model, opt.kkt_tol);
         a.note = "solved by presolve";
-        if (!a.kkt.ok) a.message = "presolve solved the model but its solution failed the KKT check: " + a.kkt.summary();
         return a;
       case PresolveStatus::Reduced:
         work = &pre.reduced;
@@ -131,12 +147,7 @@ Attempt run_attempt(const LpModel& model, const LpOptions& opt, bool use_presolv
       if (use_scaling) s = unscale_solution(sc, s);
       if (use_presolve) s = postsolve(pre.stack, s);
       a.solution = s;
-      a.kkt = check_kkt(model, a.solution, opt.kkt_tol);
-      a.verified = a.kkt.ok;
-      if (!a.kkt.ok) {
-        a.status = Status::NumericalError;
-        a.message = "the solution failed the KKT check on the original model: " + a.kkt.summary();
-      }
+      accept_optimal(a, model, opt.kkt_tol);
       break;
     }
     case EngineStatus::Infeasible: {
@@ -249,6 +260,8 @@ LpResult LpSolver::solve(const LpModel& model) const {
       res.status = a.status;
       res.solution = a.solution;
       res.kkt = a.kkt;
+      res.dual_bound = a.bound;
+      res.rigorous = a.bound.rigorous && a.status == Status::Optimal;
       res.farkas_ray = a.farkas;
       res.unbounded_ray = a.ray;
       res.unbounded_point = a.point;
