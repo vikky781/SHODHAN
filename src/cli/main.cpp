@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "factor_bench.hpp"
 #include "info.hpp"
 #include "presolve_report.hpp"
 #include "shodhan/kkt.hpp"
@@ -27,6 +28,10 @@ void print_usage(std::ostream& out) {
       << "  shodhan info <file>        print a summary of the model in an MPS file\n"
       << "  shodhan presolve <file> [--write-presolved out.mps] [--no-dual-needed] [--mip]\n"
       << "                             presolve the model and report what was reduced\n"
+      << "  shodhan factor-bench <file> [--threshold u] [--max-updates k]\n"
+      << "                             factorize a crash basis of the model and report LU\n"
+      << "                             statistics, random solves and updates (developer\n"
+      << "                             diagnostic, not a benchmark)\n"
       << "  shodhan solve <file>       presolve and scale the model, then solve it\n"
       << "                             (the solver itself is not implemented yet)\n"
       << "  shodhan --help             show this help\n"
@@ -175,6 +180,7 @@ int run(const std::vector<std::string>& args) {
   }
   if (cmd == "info" || cmd == "solve") return run_info_or_solve(cmd, args);
   if (cmd == "presolve") return run_presolve(args);
+  if (cmd == "factor-bench") return shodhan::cli::run_factor_bench(args);
   return usage_error("unknown command '" + cmd + "'");
 }
 

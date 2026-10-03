@@ -147,6 +147,31 @@ def main():
     rc, _, err = run(exe, "info", os.path.join(models, "does_not_exist.mps"))
     check("missing file is a read error (1)", rc == 1 and "error" in err, repr((rc, err)))
 
+    # ---- factor-bench ----
+    rc, out, err = run(exe, "factor-bench", lp)
+    check("factor-bench exits 0", rc == 0, repr((rc, err)))
+    check("factor-bench says it is a diagnostic, not a benchmark", "not a benchmark" in out, out)
+    check("factor-bench prints the factorization statistics",
+          "m:                4" in out and "nnz(B):" in out and "nnz(L):" in out and "nnz(U):" in out
+          and "fill ratio:" in out and "pivots:" in out and "factor time:" in out, out)
+    check("factor-bench prints the solve counters and residuals",
+          "50 random solves" in out and "hypersparse path:" in out and "dense path:" in out
+          and "worst relative residual, ftran:" in out and "worst relative residual, btran:" in out, out)
+    check("factor-bench runs the update sequence", "Forrest-Tomlin run" in out and "updates accepted:" in out, out)
+    rc, out, _ = run(exe, "factor-bench", lp, "--threshold", "0.5", "--max-updates", "5")
+    check("factor-bench accepts --threshold and --max-updates",
+          rc == 0 and "u = 0.5" in out and "max updates 5" in out, out)
+    rc, _, err = run(exe, "factor-bench")
+    check("factor-bench without file is a usage error (1)", rc == 1 and "needs a file" in err, err)
+    rc, _, err = run(exe, "factor-bench", lp, "--threshold", "7")
+    check("factor-bench rejects a threshold above 1", rc == 1 and "--threshold" in err, err)
+    rc, _, err = run(exe, "factor-bench", lp, "--max-updates", "-3")
+    check("factor-bench rejects a negative update limit", rc == 1 and "--max-updates" in err, err)
+    rc, _, err = run(exe, "factor-bench", lp, "--bogus")
+    check("factor-bench rejects an unknown option", rc == 1 and "unknown option" in err, err)
+    rc, _, err = run(exe, "factor-bench", os.path.join(models, "does_not_exist.mps"))
+    check("factor-bench on a missing file is a read error (1)", rc == 1 and "error" in err, err)
+
     if failures:
         print("%d CLI check(s) failed" % len(failures))
         return 1
