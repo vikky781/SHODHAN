@@ -99,6 +99,30 @@ class OptimalTests(unittest.TestCase):
         self.assertEqual(verify(TINY, cert)[0], 2)
 
 
+class DualNoiseTests(unittest.TestCase):
+    """A multiplier that is zero in theory but 1e-14 in floating point meets an infinite bound."""
+
+    MODEL = "NAME NOISE\nROWS\n N COST\n G R1\n E R2\nCOLUMNS\n X COST 1 R1 1\n F R1 1 R2 1\nRHS\n RHS R1 1\nBOUNDS\n FR BND F\nENDATA\n"
+    PROB = dict(rows=2, cols=2, nnz=3)
+
+    def cert(self, y2):
+        return make_cert(self.MODEL, "optimal", {"x": {"X": 1, "F": 0}, "y": {"R1": 1, "R2": y2}}, **self.PROB)
+
+    def test_exact_multipliers_are_rigorous(self):
+        code, rep = verify(self.MODEL, self.cert(-1))
+        self.assertEqual((code, rep.detail, rep.rigorous), (0, "PASS_OPTIMAL", True))
+
+    def test_noise_gives_tolerance_level_verdict(self):
+        code, rep = verify(self.MODEL, self.cert(-1 + 1e-14))
+        self.assertEqual((code, rep.detail, rep.rigorous), (0, "PASS_OPTIMAL_TOL", False))
+
+    def test_noise_is_not_accepted_when_strict(self):
+        self.assertEqual(verify(self.MODEL, self.cert(-1 + 1e-14), dual_zero_tol=0)[0], 1)
+
+    def test_large_wrong_sign_is_never_dropped(self):
+        self.assertEqual(verify(self.MODEL, self.cert(-0.5))[0], 1)
+
+
 class InfeasibleTests(unittest.TestCase):
     INF = "NAME INF\nROWS\n N C\n L R1\n G R2\nCOLUMNS\n X C 1 R1 1\n X R2 1\n Y C 2 R1 1\n Y R2 1\nRHS\n RHS R1 1 R2 3\nENDATA\n"
 

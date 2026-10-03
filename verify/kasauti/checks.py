@@ -14,12 +14,13 @@ INCONCLUSIVE = "INCONCLUSIVE"
 
 
 class Options:
-    def __init__(self, primal_tol=1e-6, gap_tol=1e-6, ray_tol=1e-9, int_tol=1e-6, farkas_zero_tol=1e-12):
+    def __init__(self, primal_tol=1e-6, gap_tol=1e-6, ray_tol=1e-9, int_tol=1e-6, farkas_zero_tol=1e-12, dual_zero_tol=1e-9):
         self.primal_tol = primal_tol
         self.gap_tol = gap_tol
         self.ray_tol = ray_tol
         self.int_tol = int_tol
         self.farkas_zero_tol = farkas_zero_tol
+        self.dual_zero_tol = dual_zero_tol
 
 
 class Report:
@@ -154,7 +155,7 @@ def check_optimal(model, cert, ar, opt, rep):
     c, offset = internal_costs(model, ar)
     sgn = _sense_sign(model)
 
-    abs_v, rel_v, where, _ = primal_violation(model, ar, x)
+    abs_v, rel_v, where, act = primal_violation(model, ar, x)
     primal_ok = rel_v <= opt.primal_tol
     rep.say("primal feasibility: max violation %s absolute, %s relative%s" % (fmt(abs_v), fmt(rel_v), (" at " + where) if where else ""))
     rep.check("primal_feasibility", primal_ok, max_abs=abs_v, max_rel=rel_v, tolerance=opt.primal_tol)
@@ -163,30 +164,49 @@ def check_optimal(model, cert, ar, opt, rep):
     d = []
     for j, col in enumerate(model.col_entries):
         d.append(c[j] - ar.total([ar.num(a) * y[i] for i, a in col if y[i] != 0]))
-    lb_terms = []
-    infinite_reason = None
-    for i in range(model.n_rows):
-        if y[i] > 0:
-            if model.row_lo[i] is None:
-                infinite_reason = "row %s has y > 0 but no lower bound" % model.row_names[i]
+    def dual_bound(drop):
+        """LB(y) (model-independent weak-duality bound). drop = 0: strict. drop > 0: a multiplier or reduced
+        cost below drop times its natural scale that meets an infinite bound counts as zero. Returns
+        (lb or None, reason, dropped list, effect on the primal point)."""
+        terms, reason, dropped, effect = [], None, [], []
+        ymax = max([ar.absval(v) for v in y] + [ar.zero])
+        for i in range(model.n_rows):
+            if y[i] > 0:
+                if model.row_lo[i] is None:
+                    if drop > 0 and y[i] <= drop * ymax:
+                        dropped.append("row %s" % model.row_names[i])
+                        effect.append(y[i] * ar.absval(act[i]))
+                    else:
+                        reason = "row %s has y > 0 but no lower bound" % model.row_names[i]
+                else:
+                    terms.append(y[i] * ar.num(model.row_lo[i]))
+            elif y[i] < 0:
+                if model.row_hi[i] is None:
+                    if drop > 0 and -y[i] <= drop * ymax:
+                        dropped.append("row %s" % model.row_names[i])
+                        effect.append(-y[i] * ar.absval(act[i]))
+                    else:
+                        reason = "row %s has y < 0 but no upper bound" % model.row_names[i]
+                else:
+                    terms.append(y[i] * ar.num(model.row_hi[i]))
+        for j in range(model.n_cols):
+            if d[j] == 0:
+                continue
+            need_lo = d[j] > 0
+            bound = model.col_lo[j] if need_lo else model.col_hi[j]
+            if bound is None:
+                scale = ar.absval(c[j]) + ar.total([ar.absval(ar.num(a) * y[i]) for i, a in model.col_entries[j] if y[i] != 0])
+                if drop > 0 and ar.absval(d[j]) <= drop * scale:
+                    dropped.append("column %s" % model.col_names[j])
+                    effect.append(ar.absval(d[j]) * ar.absval(x[j]))
+                else:
+                    reason = "column %s has d %s 0 but no %s bound" % (model.col_names[j], ">" if need_lo else "<", "lower" if need_lo else "upper")
             else:
-                lb_terms.append(y[i] * ar.num(model.row_lo[i]))
-        elif y[i] < 0:
-            if model.row_hi[i] is None:
-                infinite_reason = "row %s has y < 0 but no upper bound" % model.row_names[i]
-            else:
-                lb_terms.append(y[i] * ar.num(model.row_hi[i]))
-    for j in range(model.n_cols):
-        if d[j] > 0:
-            if model.col_lo[j] is None:
-                infinite_reason = "column %s has d > 0 but no lower bound" % model.col_names[j]
-            else:
-                lb_terms.append(d[j] * ar.num(model.col_lo[j]))
-        elif d[j] < 0:
-            if model.col_hi[j] is None:
-                infinite_reason = "column %s has d < 0 but no upper bound" % model.col_names[j]
-            else:
-                lb_terms.append(d[j] * ar.num(model.col_hi[j]))
+                terms.append(d[j] * ar.num(bound))
+        if reason is not None:
+            return None, reason, dropped, ar.total(effect)
+        return offset + ar.total(terms), None, dropped, ar.total(effect)
+
     primal_obj = offset + ar.total([c[j] * x[j] for j in range(model.n_cols) if x[j] != 0])
     obj_model = sgn * primal_obj
     rep.say("primal objective (model sense): %s" % fmt(obj_model))
@@ -198,28 +218,40 @@ def check_optimal(model, cert, ar, opt, rep):
         claim_ok = diff <= opt.gap_tol * (1 + ar.absval(obj_model))
         rep.say("claimed objective %s versus exact %s: difference %s" % (fmt(cl), fmt(obj_model), fmt(diff)))
         rep.check("claimed_objective", claim_ok, claimed=cl, exact=obj_model, difference=diff)
-    if infinite_reason is not None:
+    lb, infinite_reason, dropped, effect = dual_bound(0)
+    tolerant = False
+    if lb is None and opt.dual_zero_tol > 0:
+        strict_reason = infinite_reason
+        lb, infinite_reason, dropped, effect = dual_bound(opt.dual_zero_tol)
+        if lb is not None:
+            tolerant = True
+            rep.say("strict dual bound is -infinity (%s): the multipliers are floating-point numbers, so a reduced cost that is zero "
+                    "in theory is a tiny nonzero in exact arithmetic" % strict_reason)
+            rep.say("dropping %d reduced cost(s)/multiplier(s) below %g of their scale (%s): this changes the objective of the primal "
+                    "point by at most %s; the bound is then NOT rigorous" % (len(dropped), opt.dual_zero_tol, ", ".join(dropped[:5]) + (", ..." if len(dropped) > 5 else ""), fmt(effect)))
+    if lb is None:
         rep.say("dual bound: -infinity (%s): the dual side proves nothing" % infinite_reason)
         rep.check("dual_bound", False, reason=infinite_reason)
         gap_ok = False
         lb_model = None
     else:
-        lb = offset + ar.total(lb_terms)
         gap = primal_obj - lb
         lb_model = sgn * lb
         word = "lower" if sgn == 1 else "upper"
-        rep.say("rigorous dual %s bound LB(y): %s (valid for every feasible x by weak duality)" % (word, fmt(lb_model)))
+        rep.say("%s dual %s bound LB(y): %s%s" % ("tolerance-level" if tolerant else "rigorous", word, fmt(lb_model),
+                                                 "" if tolerant else " (valid for every feasible x by weak duality)"))
         rep.say("gap |primal objective - bound|: %s" % fmt(ar.absval(gap)))
         scale = 1 + ar.absval(obj_model)
         gap_ok = gap <= opt.gap_tol * scale
         if gap < -opt.gap_tol * scale:
             rep.say("note: the primal point beats the dual bound by %s: it is infeasible by tolerance, not exactly feasible" % fmt(-gap))
-        rep.check("dual_gap", gap_ok, lower_bound=lb_model, primal_objective=obj_model, gap=gap, tolerance=opt.gap_tol)
+        rep.check("dual_gap", gap_ok, lower_bound=lb_model, primal_objective=obj_model, gap=gap, tolerance=opt.gap_tol,
+                  strict=not tolerant, dropped=len(dropped))
     ok = primal_ok and gap_ok and claim_ok
     rep.data.update({"primal_objective": _jsonable(obj_model), "dual_bound": _jsonable(lb_model), "max_primal_violation": _jsonable(abs_v)})
     if ok:
-        rep.detail = "PASS_OPTIMAL"
-        rep.rigorous = abs_v == 0 and ar.exact
+        rep.detail = "PASS_OPTIMAL_TOL" if tolerant else "PASS_OPTIMAL"
+        rep.rigorous = abs_v == 0 and ar.exact and not tolerant
         rep.say("the optimum lies in [%s, %s]%s" % (fmt(min(obj_model, lb_model)), fmt(max(obj_model, lb_model)),
                                                       "" if rep.rigorous else " (within the stated tolerances: the point is not exactly feasible or the mode is float)"))
     else:

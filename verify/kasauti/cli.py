@@ -28,6 +28,8 @@ def _build_parser():
     p.add_argument("--int-tol", type=float, default=1e-6, help="integrality tolerance for feasible certificates (default 1e-6)")
     p.add_argument("--farkas-zero-tol", type=float, default=1e-12,
                    help="relative size below which coefficients of A^T y are treated as zero if the strict check fails (0 = strict only; default 1e-12)")
+    p.add_argument("--dual-zero-tol", type=float, default=1e-9,
+                   help="relative size below which a reduced cost or multiplier that meets an infinite bound is treated as zero if the strict dual bound is -infinity (0 = strict only; default 1e-9, the solver accepts 1e-6)")
     p.add_argument("--report", help="write a JSON report to this file")
     p.add_argument("--version", action="version", version="kasauti " + __version__)
     return p
@@ -55,7 +57,7 @@ def verify(model_path, cert_path, args, out=None):
     """Runs the verification and returns (exit code, Report). ``out`` receives the text."""
     emit = out or (lambda s: print(s))
     rep = checks.Report()
-    opt = checks.Options(args.primal_tol, args.gap_tol, args.ray_tol, args.int_tol, args.farkas_zero_tol)
+    opt = checks.Options(args.primal_tol, args.gap_tol, args.ray_tol, args.int_tol, args.farkas_zero_tol, getattr(args, "dual_zero_tol", 1e-9))
 
     try:
         data = read_bytes(model_path)
