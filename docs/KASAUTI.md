@@ -1,0 +1,126 @@
+# KASAUTI: the independent certificate verifier
+
+KASAUTI (`verify/kasauti/`) checks a solver's claim about an LP from the model file and a certificate, using
+nothing but the Python standard library. It has no access to the solver: it contains its own MPS parser (written
+from the conventions in [MPS_FORMAT.md](MPS_FORMAT.md), not translated from the C++ reader) and does its
+arithmetic in exact rationals (`fractions.Fraction`) or, for very large models, in compensated floating point.
+The certificate format and the mathematics of every check are in [CERTIFICATES.md](CERTIFICATES.md).
+
+## Use
+
+```sh
+shodhan solve model.mps --write-cert model.cert.json
+python -m kasauti model.mps model.cert.json            # run from verify/, or with PYTHONPATH=verify
+```
+
+The solve command prints the certificate path and the verification command. Options:
+
+| Option | Meaning |
+|--------|---------|
+| `--mode auto\|exact\|float` | exact (Fractions) or float; `auto` is exact up to 200000 nonzeros and then float, with an explicit warning that the result is not an exact proof |
+| `--primal-tol 1e-6` | relative bound violation accepted |
+| `--gap-tol 1e-6` | relative gap between primal objective and dual bound |
+| `--ray-tol 1e-9` | relative violation of the recession-cone conditions |
+| `--farkas-zero-tol 1e-12` | retry an infeasibility proof dropping coefficients below this (0 = never) |
+| `--dual-zero-tol 1e-9` | retry an optimality bound dropping multipliers below this (0 = never) |
+| `--sol FILE` | check a `.sol` file (feasibility and objective only) |
+| `--report out.json` | machine-readable report |
+
+Exit codes: `0` PASS, `1` FAIL, `2` INCONCLUSIVE (status `other`, unsupported or malformed input, usage error).
+
+## Verdicts and what they prove
+
+| Verdict | Meaning |
+|---------|---------|
+| `PASS_OPTIMAL` | exact mode and an exactly feasible point: the optimum lies in `[bound, objective]`. A proof. |
+| `PASS_OPTIMAL_TOL` | the strict dual bound was `-infinity` because of tiny wrong-signed multipliers; a bound after dropping them agrees with the objective. **Tolerance-checked, not a proof.** |
+| `PASS_INFEASIBLE`, `PASS_INFEASIBLE_TOL` | disjoint intervals, exactly / after dropping tiny coefficients |
+| `PASS_UNBOUNDED`, `PASS_UNBOUNDED_TOL` | feasible point and improving recession direction, exactly / within tolerance |
+| `PASS_FEASIBLE` | feasibility and integrality only; optimality not certified |
+| `FAIL` | a check failed, the hash does not match, or the certificate is malformed |
+
+A verdict is called rigorous only if it has no `_TOL` suffix, was computed in exact mode, and (for optimal and
+unbounded claims) the point is exactly feasible. The final line of the output says "rigorous: exact arithmetic"
+or "tolerance-checked, not a proof". Corpus and test summaries always print both counts.
+
+The default `--dual-zero-tol 1e-9` was chosen after seeing a failing case, not derived in advance: with the
+first guess, `1e-12`, a correct answer whose smallest wrong-signed multiplier was `1.6e-12` of the largest one
+failed. `1e-9` is 1000 times smaller than the solver's own dual tolerance.
+
+Example (`tests/models/tiny_lp.mps`, a maximization):
+
+```
+primal objective (model sense): 94
+rigorous dual upper bound LB(y): 94 (valid for every feasible x by weak duality)
+gap |primal objective - bound|: 0
+the optimum lies in [94, 94]
+VERDICT: PASS_OPTIMAL  (rigorous: exact arithmetic)
+```
+
+## Independence
+
+`scripts/check_verify_independence.py` fails if any file in `verify/` imports a module outside the standard
+library (or the verifier's own packages) or mentions the C++ sources. The Python tests run the solver only as an
+executable (`SHODHAN_EXE`) to produce inputs; no code is shared.
+
+## What is tested
+
+All of this runs under `ctest` (and the Python parts under `python -m unittest discover -s tests -t .` in `verify/`):
+
+- **Unit tests**: the parser (every MPS feature, free and fixed format), every check, every verdict, malformed
+  certificates.
+- **Differential parser test**: 300 generated models covering every MPS feature are read by the C++ reader and
+  by KASAUTI (`shodhan dump-model`); the numbers must agree as doubles (ranged-row bounds: a difference of up
+  to `4 * 2^-52` times the larger of rhs and range is allowed, because C++ rounds `rhs + |range|` in double). Result: 300 identical, 0 mismatches. It found
+  a real KASAUTI bug (a fixed-format number longer than the field was silently truncated).
+- **Corpus integration test**: 426 seeded LPs (60 per family: degenerate, free variables, ranged rows, boxed,
+  wide coefficients, infeasible, unbounded, plus 6 special models) are written to MPS, read back, solved by the
+  full pipeline, and each certificate is verified in exact and in float mode. Result: all 426 pass in both
+  modes and the two modes agree on all 426; 120 are rigorous and 306 are tolerance-checked. The attempts field
+  shows 291 certificates from the first configuration and 135 from the second: exactly the 60 infeasible and 75
+  unbounded models, because presolve cannot certify those statuses in its reduced model and the solver repeats
+  them without presolve to obtain a certificate in the original space.
+- **Mutation tests**: valid certificates are corrupted (x, y, Farkas multipliers, ray, point, claimed objective,
+  hash, row count, status), and an oracle written independently of the checker (plain `Fraction` code) classifies
+  each mutation as harmful (violation or gap of at least `1e-4` relative, a destroyed proof), benign (at most
+  `1e-8`) or gray. Result: 1724 of 1724 harmful mutations rejected; 416 benign mutations accepted, none rejected;
+  114 gray-zone mutations skipped (they depend on the verifier's tolerances).
+
+## Adjudication of disputed LPs
+
+The solver's pipeline and the dense test oracle disagreed on some wide-coefficient LPs. Each was solved
+exactly (rational arithmetic on the exact value of every double in the model file, Bland's rule) and the exact
+answer was verified by KASAUTI in strict mode (`--dual-zero-tol 0`), which gives an exact optimum or an exact
+point and ray. Results (`tests/support/adjudicated_seeds.hpp`):
+
+| Wide seed | Exact answer | Pipeline | Oracle | Verdict |
+|-----------|--------------|----------|--------|---------|
+| 453507 | optimal, -18266017920876808 | optimal, relative error 4e-16 | unbounded | oracle wrong |
+| 450741 | optimal, -11.437507350760493 | optimal, relative error 4.8e-6 | relative error 9e-2 | within the conditioning limit (sum of the multipliers about 6e9); oracle further off |
+| 450835 | optimal, -9.3281250009935022 | optimal, relative error 2.9e-10 | relative error 1.6e-4 | oracle wrong |
+| 453961 | optimal, 20.123667009608404 | optimal, relative error 5.5e-9 | relative error 0.19 | oracle wrong |
+| 451287 | unbounded | was NumericalError, fixed: unbounded | unbounded | engine bug fixed |
+| 450165 | unbounded | NumericalError | unbounded | open: see below |
+| 433 | optimal, 7.4272773546400339 | optimal, relative error 3.9e-6 | correct | open: polishing leaves a multiplier of 2.8e-8 on an infinite bound |
+| 1999 | infeasible by far less than any tolerance | optimal within tolerance | optimal | tolerance-level agreement |
+
+The pipeline's strict certificates for the optimal cases all `FAIL` in strict mode (the strict dual bound is
+`-infinity`: the multipliers are floating-point numbers, 1e-17 to 1e-14 of their scale for the offenders). That
+is expected and is why `PASS_OPTIMAL_TOL` exists; the exact solve is what decides who is right.
+
+Fixed: the point of an unbounded certificate was the incrementally updated primal vector, which drifts on
+ill-conditioned bases (seed 451287: rows violated by 1e-2 relative); it is now taken from a fresh factorization.
+
+Open (not fixed, reported): seed 450165 returns `NumericalError` on an exactly unbounded LP (an equality row of
+the engine's point is off by 2.3e-6 relative, above the acceptance tolerance; iterative refinement did not
+change it); seed 433 is accepted with a relative objective error of 3.9e-6 because polishing, which is
+best-effort with an iteration cap, ends with a wrong-signed multiplier of 2.8e-8.
+
+## Limits
+
+- Exact mode is used up to 200000 nonzeros; above that the float mode is not a proof.
+- Only LP certificates are verified. MILP optimality is out of scope (a `feasible` certificate is reserved).
+- Unsupported MPS input (sections the verifier does not implement, semi-continuous bounds, bounds that make
+  the model ill-posed such as an infinite `FX`) gives `INCONCLUSIVE`, never a pass.
+- The verifier checks the model file as bytes (SHA-256) and as parsed by its own reader; it cannot know that the
+  file is the model you meant to solve.

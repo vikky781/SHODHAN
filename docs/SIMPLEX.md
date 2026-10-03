@@ -243,10 +243,18 @@ basis (a test compares this with a cold solve after 300 random bound changes).
 - Tested on generated models only; no Netlib instance was run.
 - Wide coefficient ranges (1e-4..1e4) can make an LP hypersensitive (multipliers around 1e10): a point that is feasible to
   5e-10 can then have an objective that differs by several units from the exact vertex, so two solvers that both pass a
-  relative KKT check can disagree. In a stress run of 28000 LPs this showed in 3 cases (the pipeline's point was the more
-  precise one).
-- In the same stress run, 3 unbounded wide-coefficient LPs ended as `NumericalError` because the primal simplex ray did not
-  pass `check_unbounded_ray` (small entries that the pivot thresholds drop); this is not fixed.
+  relative KKT check can disagree. In a stress run of 28000 LPs this showed in 3 cases; solving them exactly and verifying
+  with KASAUTI showed the pipeline's objective was within 4.8e-6, 2.9e-10 and 5.5e-9 relative of the exact optimum and the
+  dense oracle's was off by 9e-2, 1.6e-4 and 0.19 (docs/KASAUTI.md). The "hypersensitive" exemption of the property test and
+  the stress harness was therefore replaced by the exact answers (`tests/support/adjudicated_seeds.hpp`).
+- Unbounded wide-coefficient LPs could end as `NumericalError`. One cause is fixed: the feasible point that goes with the
+  ray was the incrementally updated primal vector, which drifts on ill-conditioned bases; it is now recomputed from a fresh
+  factorization. Seed 450165 still ends as `NumericalError` (the engine's point is off by 2.3e-6 relative on an equality row).
+- Polishing is best-effort (iteration cap): seed 433 is accepted with a wrong-signed multiplier of 2.8e-8 on an infinite
+  bound and a relative objective error of 3.9e-6 against the exact optimum.
+- A weak-duality bound of the multipliers (`dual_bound.hpp`) is computed in the final acceptance: if it exists its gap to
+  the objective must be within the KKT tolerance (a point may beat it only by what its own violations explain). No bound at
+  all does not veto, because KKT already limits the dual infeasibility; the result is then recorded as not rigorous.
 - The primal simplex uses Dantzig pricing; it is a cleanup engine and may be slow on large problems.
 - Bound flipping is not combined with a cost-shifting-free guarantee: shifted costs are removed by the cleanup, which can
   need primal iterations.

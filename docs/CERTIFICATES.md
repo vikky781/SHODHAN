@@ -34,6 +34,9 @@ integers. A value that is not finite is never written.
   only). `y` is in the convention of the internal minimization form: for a `max` model the verifier replaces
   the objective `c` by `-c` and checks as for a minimization problem (the same convention as
   [CONVENTIONS.md](CONVENTIONS.md)). Reduced costs are not in the file: the verifier derives `d = c - A^T y`.
+  Also `dual_bound`, the solver's own claim about its multipliers: `{rigorous, available}` and, when a bound
+  exists, `{value, dropped, gap_rel}`. It is a claim, not evidence (the verifier recomputes everything), but a
+  claim of `rigorous: true` that exact arithmetic refutes makes the certificate FAIL.
 - **`infeasible`**: `farkas`: `{y: {row name: multiplier}}`.
 - **`unbounded`**: `point` (a primal feasible `x0`, nonzeros only) and `ray` (column name to value, nonzeros
   only). Both are required: a ray alone proves nothing without a feasible point.
@@ -81,6 +84,22 @@ objective row of the RHS section (MPS convention, see MPS_FORMAT.md). All data a
    statement is rigorous: the optimum lies in `[LB, primal objective]`. If `x` is only feasible within
    tolerance, the report says so, and the claim is "optimal within the stated tolerances". The claimed objective
    in the file must match the exact one (in the model's sense) within tolerance.
+5. **A point that beats the bound.** If `x` is feasible only within tolerance, its objective can lie below
+   `LB(y)`. That is consistent only up to what its own violations explain: `objective >= LB - sum_i |y_i| viol_i
+   - sum_j |d_j| viol_j - gap_tol (1 + |objective|)`. A larger shortfall means the point and the multipliers are
+   inconsistent and the certificate fails.
+6. **Tolerance-level bound (`PASS_OPTIMAL_TOL`).** The multipliers are floating-point numbers, so a reduced cost
+   that is zero in theory is a tiny nonzero in exact arithmetic; if it has the wrong sign for a column with an
+   infinite bound, the strict `LB` is `-inf` although the answer is right. Only then does the verifier retry,
+   treating a multiplier or reduced cost below `--dual-zero-tol` (default `1e-9`) of its scale as zero, and it
+   reports how many it dropped and the largest change this can make to the primal objective. **This result is
+   tolerance-checked, not a proof**: the retried bound is not a valid bound for every feasible point. The
+   default `1e-9` was chosen after seeing a failing case (a correct answer with a multiplier of `1.6e-12` of the
+   largest one failed at the first guess, `1e-12`); it is 1000 times smaller than the solver's own dual
+   tolerance (`1e-6`), and it was not derived in advance.
+7. **The solver's `rigorous` claim.** If the certificate says `dual_bound.rigorous = true`, the strict bound must
+   exist in exact arithmetic; if it does not, the certificate fails (exact mode; float mode cannot judge it).
+   The converse is not required: the solver's claim is deliberately conservative.
 
 ### Infeasible: disjoint intervals
 
@@ -96,9 +115,10 @@ C = [ sum_j min(g_j col_lo_j, g_j col_hi_j) , sum_j max(g_j col_lo_j, g_j col_hi
 (an infinite endpoint where a nonzero coefficient meets an infinite bound). If `R` and `C` are disjoint the
 model has no feasible point. The check is exact; endpoints are printed. Because the multipliers are doubles, a
 coefficient `g_j` that is zero in theory can be a tiny nonzero in exact arithmetic and then meets an infinite
-bound; the strict check fails in that case and the verifier reports it. The option `--farkas-zero-tol`
-(default 0) lets the user drop coefficients below a relative tolerance, in which case the verdict is
-`PASS_INFEASIBLE_TOL` and lists what was dropped (it is then not a rigorous proof).
+bound; the strict check fails in that case and the verifier reports it. When it fails, the verifier retries
+once, dropping coefficients below `--farkas-zero-tol` (default `1e-12`, relative to the largest; `0` disables
+the retry), in which case the verdict is `PASS_INFEASIBLE_TOL`, it lists what was dropped, and the result is
+tolerance-checked, not a proof.
 
 ### Unbounded: feasible point plus recession direction
 
@@ -148,5 +168,8 @@ factorization, or the C++ certificate writer: a wrong certificate is simply reje
 
 ## 5. Tolerance conventions
 
-Defined by this project (`--primal-tol 1e-6`, `--gap-tol 1e-6`, `--ray-tol 1e-9`, relative forms as above).
-They are not claimed to be identical to the conventions of any other solution checker.
+Defined by this project (`--primal-tol 1e-6`, `--gap-tol 1e-6`, `--ray-tol 1e-9`, `--farkas-zero-tol 1e-12`,
+`--dual-zero-tol 1e-9`, relative forms as above). They are not claimed to be identical to the conventions of any
+other solution checker. Every verdict that depends on a tolerance carries the suffix `_TOL` or says
+"tolerance-checked"; only a verdict without it, from exact mode, with an exactly feasible point, is a proof.
+`--dual-zero-tol` was set after seeing a failing case, as explained under "Optimal" above.

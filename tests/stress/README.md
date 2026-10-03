@@ -21,9 +21,10 @@ build/stress/shodhan_stress wide 453507 453507 --emit-mps /tmp/lps   # write the
 ```
 
 Output: one `MISMATCH <family> seed <n> ...` line per disagreement (status, objective, KKT on the
-original model, or an invalid certificate), `HYPERSENSITIVE` lines for objectives that differ while
-both points pass the KKT check and sum|y| * 1e-9 exceeds the comparison tolerance, and a summary per
-family. The exit status is 1 if any mismatch was found.
+original model, or an invalid certificate), `ADJUDICATED` lines for seeds that were decided by exact
+arithmetic (they are compared with the exact answer in `tests/support/adjudicated_seeds.hpp`, not with
+the oracle), and a summary per family. There is no exemption for hypersensitive LPs: every other
+disagreement with the oracle is a mismatch. The exit status is 1 if any mismatch was found.
 
 `--emit-mps` writes the model instead of solving it, so an instance can be turned into a certificate
 with `shodhan solve --write-cert` and checked with KASAUTI (`docs/KASAUTI.md`).
