@@ -211,3 +211,49 @@ from the primal feasible basis the primal simplex started from.
   `final_tol` (default 1e-6). If it fails, the tolerances are tightened to 1e-9 once and the cleanup is redone; if
   it still fails the result is `NumericalError`, never `Optimal`. An `Infeasible` result must pass `check_farkas`
   (tolerance 1e-9) and an `Unbounded` one `check_unbounded_ray` (1e-8), otherwise it also becomes `NumericalError`.
+
+## 10. The LP pipeline
+
+`LpSolver` (`include/shodhan/lp_solver.hpp`) runs: presolve (optional) -> scaling (optional) -> `SimplexEngine` ->
+unscale -> postsolve -> `check_kkt` on the ORIGINAL model with `kkt_tol` (default 1e-6). Maximization models are
+negated inside the engine; `y` and `d` stay in minimization form and the objective is in the model's sense.
+
+- `Optimal` is returned only if the KKT check on the original model passed.
+- `Infeasible` carries Farkas multipliers (the engine's multipliers times the row scale factors) that pass
+  `check_farkas` on the original model; `Unbounded` carries a ray (the engine's ray times the column scale
+  factors) that passes `check_unbounded_ray`.
+- A status reached by presolve alone (or by the engine on the reduced model) cannot be certified in the original
+  space: it is confirmed by solving the scaled original without presolve.
+- If an attempt cannot be certified, fallbacks follow: without presolve; with tolerances 100 times tighter; without
+  scaling. Then `NumericalError`. `LpResult::attempts` and `message` say what happened.
+- `TimeLimit` (`Params::time_limit`, whole pipeline) and `IterationLimit` are reported as such.
+
+## 11. Defaults (all targets) and warm start
+
+`primal_tol` 1e-6 (relative to the bound), `dual_tol` 1e-6, `refactor_interval` 100, `max_growth` 1e8,
+`pivot_agreement_tol` 1e-7, `min_pivot_abs` 1e-9, `min_pivot_rel` 1e-7, `perturb_scale` 5e-7, `stall_iterations` 500,
+`max_trouble` 6, `max_cleanup_rounds` 5, `artificial_bound` 1000, `polish_tol` 1e-13, `final_tol` 1e-6.
+
+Warm start: after `solve()`, `change_col_bounds` / `change_row_bounds` move nonbasic variables to the new bound and mark the
+primal values stale; the next `solve()` recomputes `x_B` with one ftran and resolves with the dual simplex from the current
+basis (a test compares this with a cold solve after 300 random bound changes).
+
+## 12. Known limitations
+
+- Tested on generated models only; no Netlib instance was run.
+- Wide coefficient ranges (1e-4..1e4) can make an LP hypersensitive (multipliers around 1e10): a point that is feasible to
+  5e-10 can then have an objective that differs by several units from the exact vertex, so two solvers that both pass a
+  relative KKT check can disagree. In a stress run of 28000 LPs this showed in 3 cases (the pipeline's point was the more
+  precise one).
+- In the same stress run, 3 unbounded wide-coefficient LPs ended as `NumericalError` because the primal simplex ray did not
+  pass `check_unbounded_ray` (small entries that the pivot thresholds drop); this is not fixed.
+- The primal simplex uses Dantzig pricing; it is a cleanup engine and may be slow on large problems.
+- Bound flipping is not combined with a cost-shifting-free guarantee: shifted costs are removed by the cleanup, which can
+  need primal iterations.
+
+## 13. References
+
+- A. Koberstein, "The dual simplex method, techniques for a fast and stable implementation", PhD thesis, Universitat Paderborn, 2005.
+- I. Maros, "A generalized Dual Phase-2 simplex algorithm", European Journal of Operational Research 149, 2003.
+- J. J. Forrest and D. Goldfarb, "Steepest-edge simplex algorithms for linear programming", Mathematical Programming 57, 1992.
+- P. M. J. Harris, "Pivot selection methods of the Devex LP code", Mathematical Programming 5, 1973.

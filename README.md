@@ -6,7 +6,8 @@ SHODHAN is being built step by step. At this stage it can read and write MPS
 models, describe them, scale them, and presolve LPs and MIPs with a postsolve
 that recovers primal and dual solutions. It also has the sparse LU factorization
 of simplex bases (with FTRAN/BTRAN and the Forrest-Tomlin update) that a simplex
-solver will sit on; it cannot solve anything yet.
+solver sits on. LPs can now be solved end to end (presolve, scaling, dual simplex with a primal
+cleanup, KKT check on the original model); integer models are not solved yet.
 
 ## Build
 
@@ -57,7 +58,8 @@ SHODHAN_SEED_FIRST=1 SHODHAN_SEED_COUNT=6000 build/shodhan_tests presolve
 ```sh
 shodhan info  model.mps    # summary: size, types, bounds, scaling indicator
 shodhan presolve model.mps [--write-presolved out.mps] [--no-dual-needed] [--mip]
-shodhan solve model.mps    # presolve + scaling, then reports NotImplemented
+shodhan solve model.mps [--no-presolve] [--no-scaling] [--no-perturb] [--time-limit s]
+                           [--iter-limit n] [--write-sol path] [--verbose]
 shodhan factor-bench model.mps [--threshold u] [--max-updates k]
 shodhan --help
 shodhan --version
@@ -75,7 +77,9 @@ columns substituted for any rank deficiency), factorizes it, prints the sizes, f
 50 random solves with sparse right-hand sides (counts per hypersparse/dense path and residuals) and a short
 Forrest-Tomlin run. It is a developer diagnostic, not a benchmark, and says nothing about solver performance.
 
-Exit codes: 0 ok, 1 usage, read or write error, 2 not implemented.
+Exit codes: 0 ok (optimal for `solve`), 1 usage, read or write error, 2 not implemented, 3 `solve` ended
+infeasible, unbounded, at a limit or numerically. `solve` reports `Optimal` only after the KKT check on the
+original model passed, and `Infeasible`/`Unbounded` only with a verified certificate.
 
 ## Status
 
@@ -95,9 +99,10 @@ Exit codes: 0 ok, 1 usage, read or write error, 2 not implemented.
 | Forrest-Tomlin basis update                          | implemented         |
 | `shodhan info`, `shodhan presolve`                   | implemented         |
 | `shodhan factor-bench` (developer diagnostic for the LU) | implemented     |
-| `shodhan solve`                                      | presolve + scaling, then `NotImplemented` |
+| LP dual simplex (bound flipping, Harris, steepest edge, perturbation, phase 1, primal cleanup), Farkas and ray certificates | implemented; tested on generated models only |
+| `shodhan solve`                                      | LPs: full pipeline; integer models: `NotImplemented` |
+| `bench/run_lp_set.py`                                | implemented; no Netlib files were available, so nothing real was run |
 | QPS files (QUADOBJ / QMATRIX)                        | not yet implemented |
-| LP solver (simplex)                                  | not yet implemented |
 | LP solver (interior point)                           | not yet implemented |
 | MILP branch-and-bound                                | not yet implemented |
 | Convex QP                                            | not yet implemented |
@@ -128,6 +133,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map,
 [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for the sign and scaling conventions,
 [docs/PRESOLVE.md](docs/PRESOLVE.md) for each reduction and its postsolve,
 [docs/LU.md](docs/LU.md) for the basis factorization and its update,
+[docs/SIMPLEX.md](docs/SIMPLEX.md) for the simplex engine and the LP pipeline,
 [docs/MPS_FORMAT.md](docs/MPS_FORMAT.md) for the MPS conventions SHODHAN
 follows, and [data/README.md](data/README.md) for where to obtain benchmark
 instances (they are never committed).

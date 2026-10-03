@@ -136,7 +136,7 @@ def check_includes(verbose, problems):
                             % (rel, lineno, name, m.group(1)))
 
 
-SUPPORT_RE = re.compile(r"support/|dense_ref_lp|dense_lu|lu_testing|work_check|random_lp|test_harness|test_models")
+SUPPORT_RE = re.compile(r"support/|dense_ref_lp|dense_lu|lu_testing|work_check|simplex_lps|random_lp|test_harness|test_models")
 
 
 def cmake_call_text(text, start_pattern):

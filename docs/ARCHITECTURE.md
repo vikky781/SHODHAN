@@ -14,6 +14,8 @@ src/scaling/       row/column/objective scaling and unscaling
 src/presolve/      presolve reductions and postsolve
 src/io/            MPS reader and writer
 src/linalg/        sparse LU of simplex bases, FTRAN/BTRAN, Forrest-Tomlin update
+src/lp/            simplex engine (dual, primal cleanup) and the LP pipeline
+bench/             LP set runner (Python, standard library only)
 src/cli/           the `shodhan` command-line tool
 tests/             unit tests, a header-only test harness, toy models
 tests/support/     TEST-ONLY code: dense reference LP solver, dense LU oracle, random LP and basis generators
@@ -27,7 +29,7 @@ Dependencies between modules point downwards only:
 ```
 cli  ->  presolve  ->  scaling  ->  model  ->  util
 cli  ->  io  ->  model  ->  util
-cli  ->  linalg  ->  model  ->  util
+cli  ->  lp  ->  presolve, scaling, linalg  ->  model  ->  util
 ```
 
 | Module | Main headers | What it does |
@@ -39,6 +41,7 @@ cli  ->  linalg  ->  model  ->  util
 | presolve | `presolve.hpp` | nine reductions, each with a postsolve record; `postsolve` recovers x, y, d |
 | io     | `mps.hpp` | MPS reader (fixed/free, optional `.gz`) and writer |
 | linalg | `sparse_work.hpp`, `basis_factor.hpp` | `SparseWork` (dense array + index list), `BasisFactor`: LU of a basis of `[A | -I]`, `ftran`/`btran`, `repair`, Forrest-Tomlin `update` (see `docs/LU.md`) |
+| lp     | `simplex_engine.hpp`, `lp_solver.hpp`, `rays.hpp` | `SimplexEngine` (dual simplex, primal cleanup, warm start), `LpSolver` pipeline, Farkas and ray checkers (docs/SIMPLEX.md) |
 | cli    | (none public) | `shodhan info`, `shodhan presolve`, `shodhan solve`, `shodhan factor-bench` |
 
 ### Model conventions
