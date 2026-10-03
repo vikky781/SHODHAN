@@ -30,6 +30,8 @@ import sys
 FORBIDDEN_EXACT = {
     "highs", "scip", "clp", "cbc", "coin", "glpk", "amd", "eigen", "blas",
     "lapack", "cblas", "lapacke", "openblas", "cudss", "cusolver",
+    # SuiteSparse components that are easy to pull in under their own names.
+    "klu", "csparse", "cxsparse", "colamd", "ccolamd", "camd",
 }
 # Names matched as token prefixes (case-insensitive), e.g. cusolverDn.h.
 FORBIDDEN_PREFIX = (
@@ -134,7 +136,7 @@ def check_includes(verbose, problems):
                             % (rel, lineno, name, m.group(1)))
 
 
-SUPPORT_RE = re.compile(r"support/|dense_ref_lp|random_lp|test_harness|test_models")
+SUPPORT_RE = re.compile(r"support/|dense_ref_lp|dense_lu|lu_testing|work_check|random_lp|test_harness|test_models")
 
 
 def cmake_call_text(text, start_pattern):
