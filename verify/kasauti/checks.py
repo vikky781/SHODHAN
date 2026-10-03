@@ -164,15 +164,19 @@ def check_optimal(model, cert, ar, opt, rep):
     d = []
     for j, col in enumerate(model.col_entries):
         d.append(c[j] - ar.total([ar.num(a) * y[i] for i, a in col if y[i] != 0]))
+    offenders = []  # (name, absolute size, size relative to its scale) of every wrong-signed value on an infinite bound
+
     def dual_bound(drop):
         """LB(y) (model-independent weak-duality bound). drop = 0: strict. drop > 0: a multiplier or reduced
         cost below drop times its natural scale that meets an infinite bound counts as zero. Returns
         (lb or None, reason, dropped list, effect on the primal point)."""
         terms, reason, dropped, effect = [], None, [], []
+        offenders.clear()
         ymax = max([ar.absval(v) for v in y] + [ar.zero])
         for i in range(model.n_rows):
             if y[i] > 0:
                 if model.row_lo[i] is None:
+                    offenders.append(("row %s (y = %s)" % (model.row_names[i], fmt(y[i])), float(y[i]), float(y[i] / ymax)))
                     if drop > 0 and y[i] <= drop * ymax:
                         dropped.append("row %s" % model.row_names[i])
                         effect.append(y[i] * ar.absval(act[i]))
@@ -182,6 +186,7 @@ def check_optimal(model, cert, ar, opt, rep):
                     terms.append(y[i] * ar.num(model.row_lo[i]))
             elif y[i] < 0:
                 if model.row_hi[i] is None:
+                    offenders.append(("row %s (y = %s)" % (model.row_names[i], fmt(y[i])), float(-y[i]), float(-y[i] / ymax)))
                     if drop > 0 and -y[i] <= drop * ymax:
                         dropped.append("row %s" % model.row_names[i])
                         effect.append(-y[i] * ar.absval(act[i]))
@@ -196,6 +201,7 @@ def check_optimal(model, cert, ar, opt, rep):
             bound = model.col_lo[j] if need_lo else model.col_hi[j]
             if bound is None:
                 scale = ar.absval(c[j]) + ar.total([ar.absval(ar.num(a) * y[i]) for i, a in model.col_entries[j] if y[i] != 0])
+                offenders.append(("column %s (d = %s)" % (model.col_names[j], fmt(d[j])), float(ar.absval(d[j])), float(ar.absval(d[j]) / scale)))
                 if drop > 0 and ar.absval(d[j]) <= drop * scale:
                     dropped.append("column %s" % model.col_names[j])
                     effect.append(ar.absval(d[j]) * ar.absval(x[j]))
@@ -220,6 +226,12 @@ def check_optimal(model, cert, ar, opt, rep):
         rep.check("claimed_objective", claim_ok, claimed=cl, exact=obj_model, difference=diff)
     lb, infinite_reason, dropped, effect = dual_bound(0)
     tolerant = False
+    if lb is None and offenders:
+        worst = sorted(offenders, key=lambda o: -o[2])
+        rep.say("strict dual bound: %d wrong-signed multiplier(s)/reduced cost(s) meet an infinite bound; largest relative to their scale:" % len(worst))
+        for name, ab, rel in worst[:5]:
+            rep.say("    %s: absolute %.3g, relative %.3g" % (name, ab, rel))
+        rep.data["wrong_sign_on_infinite_bound"] = [{"item": n, "absolute": a, "relative": r} for n, a, r in worst]
     if lb is None and opt.dual_zero_tol > 0:
         strict_reason = infinite_reason
         lb, infinite_reason, dropped, effect = dual_bound(opt.dual_zero_tol)
