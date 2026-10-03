@@ -40,7 +40,7 @@ set(SHODHAN_CORE_SOURCES
   src/util/status.cpp
 )
 file(GLOB SHODHAN_OPTIONAL_CORE_SOURCES CONFIGURE_DEPENDS
-  src/util/*.cpp src/model/*.cpp src/io/*.cpp src/scaling/*.cpp src/presolve/*.cpp src/linalg/*.cpp src/lp/*.cpp)
+  src/util/*.cpp src/model/*.cpp src/io/*.cpp src/scaling/*.cpp src/presolve/*.cpp src/linalg/*.cpp src/lp/*.cpp src/cert/*.cpp)
 list(APPEND SHODHAN_CORE_SOURCES ${SHODHAN_OPTIONAL_CORE_SOURCES})
 list(REMOVE_DUPLICATES SHODHAN_CORE_SOURCES)
 
