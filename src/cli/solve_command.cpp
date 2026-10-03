@@ -138,7 +138,10 @@ int run_solve(const std::vector<std::string>& args) {
                   r.scaling_seconds, r.simplex_seconds);
     std::cout << buf;
   }
-  if (r.attempts > 1) std::cout << "Attempts:      " << r.attempts << " (fallbacks were needed; see the message)\n";
+  if (r.attempts > 1) {
+    std::cout << "Attempts:      " << r.attempts
+              << (r.message.empty() ? " (the presolve result was confirmed on the original model)" : " (fallbacks were needed; see the message)") << "\n";
+  }
   if (r.status == Status::Optimal) {
     std::cout << "KKT check on the original model (tolerance " << sci(opt.kkt_tol) << "): " << (r.kkt.ok ? "passed" : "FAILED") << "\n";
     std::cout << "  primal infeasibility " << sci(r.kkt.primal_infeasibility_abs) << " abs, " << sci(r.kkt.primal_infeasibility_rel) << " rel\n";
