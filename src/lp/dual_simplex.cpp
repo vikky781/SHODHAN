@@ -16,6 +16,7 @@
 #include <cmath>
 #include <iostream>
 
+#include "shodhan/rays.hpp"
 #include "shodhan/simplex_engine.hpp"
 
 namespace shodhan {
@@ -87,7 +88,7 @@ void SimplexEngine::compute_pivot_row() {
 //   slope -= sum_{j in K} |alpha_j| (hi_j - lo_j) > 0,
 // is passed (all its variables flip) and the search continues; otherwise the
 // entering variable is the one of K with the largest |alpha_j| (Harris pass 2).
-bool SimplexEngine::select_entering(double sigma, double delta, double margin, double* theta_dual, Index* entering,
+bool SimplexEngine::select_entering(double sigma, double delta, double margin, bool relaxed, double* theta_dual, Index* entering,
                                     std::vector<Index>* flips) {
   flips->clear();
   double amax = 0.0;
@@ -123,8 +124,14 @@ bool SimplexEngine::select_entering(double sigma, double delta, double margin, d
       cand_.push_back({std::max(s, 0.0) / aa, (std::max(s, 0.0) + tol) / aa, aa, boxed ? range : kInf, j});
     }
   };
-  collect(std::max(opt_.min_pivot_abs, opt_.min_pivot_rel * amax));
-  if (cand_.empty()) collect(opt_.min_pivot_abs);  // relative threshold removed everything
+  // Relaxed: only a tiny absolute threshold, used when the strict one led to a conclusion (primal
+  // infeasibility) that could not be certified because the dropped candidates matter.
+  if (relaxed) {
+    collect(1e-11);
+  } else {
+    collect(std::max(opt_.min_pivot_abs, opt_.min_pivot_rel * amax));
+    if (cand_.empty()) collect(opt_.min_pivot_abs);  // relative threshold removed everything
+  }
   if (cand_.empty()) return false;
 
   std::sort(cand_.begin(), cand_.end(), [](const Candidate& a, const Candidate& b) {
@@ -179,6 +186,8 @@ bool SimplexEngine::select_entering(double sigma, double delta, double margin, d
   *theta_dual = cand_[best].t;
   return true;
 }
+
+bool SimplexEngine::farkas_valid() { return check_farkas(checked_model(), farkas_, 1e-9).ok; }
 
 void SimplexEngine::record_farkas(Index r) {
   (void)r;
@@ -287,15 +296,22 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     double theta = 0.0;
     Index q = -1;
     const double margin = 0.5 * ptol(bound);
-    if (!select_entering(sigma, delta, margin, &theta, &q, &flips_)) {
+    bool found = select_entering(sigma, delta, margin, false, &theta, &q, &flips_);
+    if (!found) {
       if (updates_since_refactor_ > 0) {  // verify with a fresh factorization first
         if (!refactor_and_recompute()) return EngineStatus::NumericalError;
         continue;
       }
       if (!banned_.empty()) return EngineStatus::NumericalError;  // candidates were excluded as unreliable
       record_farkas(r);
-      return EngineStatus::Infeasible;
+      // Only claim infeasibility with a certificate that checks. If it does not, small-|alpha|
+      // candidates that the thresholds dropped matter: look at them too.
+      if (!in_phase1_ && !farkas_valid()) {
+        found = select_entering(sigma, delta, margin, true, &theta, &q, &flips_);
+        if (!found) return EngineStatus::NumericalError;
+      }
     }
+    if (!found) return EngineStatus::Infeasible;
 
     // Entering column (spike saved for the update) and the pivot check.
     load_column(model_.A, n_, q, col_);
@@ -303,7 +319,7 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     const double alpha_c = col_[r];
     const double alpha_r = row_alpha_[q];
     const double scale = std::max(std::fabs(alpha_c), std::fabs(alpha_r));
-    if (!(std::fabs(alpha_c - alpha_r) <= opt_.pivot_agreement_tol * scale) || std::fabs(alpha_c) < opt_.min_pivot_abs * 0.5) {
+    if (!(std::fabs(alpha_c - alpha_r) <= opt_.pivot_agreement_tol * scale) || std::fabs(alpha_c) < 1e-11) {
       if (updates_since_refactor_ > 0) {
         if (!refactor_and_recompute()) return EngineStatus::NumericalError;
         continue;

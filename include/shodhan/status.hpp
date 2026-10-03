@@ -9,6 +9,7 @@ enum class Status {
   Unbounded,
   InfeasibleOrUnbounded,
   TimeLimit,
+  IterationLimit,
   NumericalError,
   Interrupted,
   NotImplemented,

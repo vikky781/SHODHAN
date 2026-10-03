@@ -143,11 +143,13 @@ EngineStatus SimplexEngine::run_dual_phase1(bool* dual_feasible) {
   sync_nonbasic_values();
   compute_primal();
   const bool saved_perturb = opt_.perturb, saved_harris = opt_.harris, saved_polish = opt_.polish;
+  in_phase1_ = true;
   opt_.perturb = false;
   opt_.harris = false;
   opt_.polish = false;
   EngineStatus st = run_dual_simplex();
   if (st == EngineStatus::Optimal) st = finish_after_dual();
+  in_phase1_ = false;
   opt_.perturb = saved_perturb;
   opt_.harris = saved_harris;
   opt_.polish = saved_polish;

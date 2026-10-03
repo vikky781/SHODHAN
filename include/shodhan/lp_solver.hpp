@@ -1,0 +1,79 @@
+#pragma once
+
+#include <iosfwd>
+#include <string>
+#include <vector>
+
+#include "shodhan/kkt.hpp"
+#include "shodhan/lp_model.hpp"
+#include "shodhan/params.hpp"
+#include "shodhan/presolve.hpp"
+#include "shodhan/solution.hpp"
+#include "shodhan/status.hpp"
+
+namespace shodhan {
+
+struct LpOptions {
+  /// Tolerances (primal_tol, dual_tol), time limit, seed and verbosity.
+  Params params;
+  bool presolve = true;
+  bool scaling = true;
+  bool perturb = true;
+  long long iteration_limit = 100000000;
+  /// Tolerance of the final KKT check on the ORIGINAL model.
+  double kkt_tol = 1e-6;
+  /// Progress lines (verbosity >= 2) and notes about fallbacks go here; null is silent.
+  std::ostream* log = nullptr;
+};
+
+struct LpResult {
+  /// Optimal, Infeasible, Unbounded, TimeLimit, IterationLimit or NumericalError.
+  /// Optimal only when the KKT check on the original model passed; Infeasible
+  /// and Unbounded only with a verified certificate.
+  Status status = Status::NumericalError;
+  /// x, y, d (minimization-form multipliers) and the objective in the model's own
+  /// sense. Filled for Optimal.
+  Solution solution;
+  KktReport kkt;  ///< check on the original model (Optimal)
+
+  long long iterations = 0;
+  long long phase1_iterations = 0;
+  long long primal_iterations = 0;
+  int refactors = 0;
+  bool perturbation_used = false;
+  int attempts = 1;  ///< 1 unless a fallback was needed (see message)
+
+  double presolve_seconds = 0.0;
+  double scaling_seconds = 0.0;
+  double simplex_seconds = 0.0;
+  double total_seconds = 0.0;
+  PresolveStats presolve_stats;
+  bool presolve_ran = false;
+  std::string presolve_status_note;  ///< what presolve concluded on its own, if anything
+
+  /// Infeasible: row multipliers y (length n_rows) that pass check_farkas on the
+  /// original model.
+  std::vector<double> farkas_ray;
+  /// Unbounded: a direction (length n_cols) that passes check_unbounded_ray.
+  std::vector<double> unbounded_ray;
+  /// Human-readable remarks (fallbacks, why a status was downgraded, ...).
+  std::string message;
+};
+
+/// Full LP pipeline: presolve -> scaling -> SimplexEngine -> unscale -> postsolve
+/// -> check_kkt on the original model. Integrality is ignored (LP relaxation).
+/// A solution is never returned as Optimal unless the KKT check on the original
+/// model passed; if the first attempt fails the check, fallbacks are tried
+/// (without presolve, with tighter tolerances, without scaling) before reporting
+/// NumericalError.
+class LpSolver {
+ public:
+  explicit LpSolver(const LpOptions& options = {}) : options_(options) {}
+  LpResult solve(const LpModel& model) const;
+  const LpOptions& options() const { return options_; }
+
+ private:
+  LpOptions options_;
+};
+
+}  // namespace shodhan

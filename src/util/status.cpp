@@ -14,6 +14,8 @@ const char* to_string(Status status) noexcept {
       return "InfeasibleOrUnbounded";
     case Status::TimeLimit:
       return "TimeLimit";
+    case Status::IterationLimit:
+      return "IterationLimit";
     case Status::NumericalError:
       return "NumericalError";
     case Status::Interrupted:

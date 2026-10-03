@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "shodhan/rays.hpp"
 #include "shodhan/simplex_engine.hpp"
 
 namespace shodhan {
@@ -97,26 +98,29 @@ EngineStatus SimplexEngine::run_primal_simplex() {
     factor_.ftran(col_, true);
     double amax = 0.0;
     for (const Index i : col_.indices()) amax = std::max(amax, std::fabs(col_[i]));
-    const double pivtol = std::max(opt_.min_pivot_abs, opt_.min_pivot_rel * amax);
-
     const double hp_now = bland ? 0.0 : hp;
-    double tmax = kInf;
-    for (const Index i : col_.indices()) {
-      const double a = col_[i];
-      if (std::fabs(a) <= pivtol) continue;
-      const double rate = -dir * a;
-      const Index v = basis_[to_size(i)];
-      const double x = x_[to_size(v)];
-      double tl;
-      if (rate < 0.0 && !is_inf(lo_[to_size(v)])) tl = (x - lo_[to_size(v)] + hp_now * (1.0 + std::fabs(lo_[to_size(v)]))) / -rate;
-      else if (rate > 0.0 && !is_inf(hi_[to_size(v)])) tl = (hi_[to_size(v)] - x + hp_now * (1.0 + std::fabs(hi_[to_size(v)]))) / rate;
-      else continue;
-      tmax = std::min(tmax, tl);
-    }
     Index r = -1;
     double t_exact = kInf;
-    double best_abs = 0.0;
-    if (tmax < kInf) {
+
+    // Harris two-pass ratio test over the basic variables whose |alpha| exceeds pivtol.
+    auto ratio_test = [&](double pivtol) {
+      r = -1;
+      t_exact = kInf;
+      double tmax = kInf;
+      for (const Index i : col_.indices()) {
+        const double a = col_[i];
+        if (std::fabs(a) <= pivtol) continue;
+        const double rate = -dir * a;
+        const Index v = basis_[to_size(i)];
+        const double x = x_[to_size(v)];
+        double tl;
+        if (rate < 0.0 && !is_inf(lo_[to_size(v)])) tl = (x - lo_[to_size(v)] + hp_now * (1.0 + std::fabs(lo_[to_size(v)]))) / -rate;
+        else if (rate > 0.0 && !is_inf(hi_[to_size(v)])) tl = (hi_[to_size(v)] - x + hp_now * (1.0 + std::fabs(hi_[to_size(v)]))) / rate;
+        else continue;
+        tmax = std::min(tmax, tl);
+      }
+      if (!(tmax < kInf)) return;
+      double best_abs = 0.0;
       for (const Index i : col_.indices()) {
         const double a = col_[i];
         if (std::fabs(a) <= pivtol) continue;
@@ -137,19 +141,30 @@ EngineStatus SimplexEngine::run_primal_simplex() {
           best_abs = aa;
         }
       }
-    }
+    };
+    ratio_test(std::max(opt_.min_pivot_abs, opt_.min_pivot_rel * amax));
     const double range = hi_[to_size(q)] - lo_[to_size(q)];
     const bool boxed = !is_inf(lo_[to_size(q)]) && !is_inf(hi_[to_size(q)]);
 
     if (r < 0 && !boxed) {
-      // No basic variable blocks and the entering variable has no bound in this direction.
-      ray_.assign(to_size(n_), 0.0);
-      if (q < n_) ray_[to_size(q)] = dir;
-      for (const Index i : col_.indices()) {
-        const Index v = basis_[to_size(i)];
-        if (v < n_) ray_[to_size(v)] += -dir * col_[i];
+      // No basic variable blocks and the entering variable has no bound in this direction. Only
+      // claim it with a ray that checks; if not, basic variables with a tiny |alpha| that the
+      // pivot threshold dropped may block after all, so look at them too.
+      auto make_ray = [&]() {
+        ray_.assign(to_size(n_), 0.0);
+        if (q < n_) ray_[to_size(q)] = dir;
+        for (const Index i : col_.indices()) {
+          const Index v = basis_[to_size(i)];
+          if (v < n_) ray_[to_size(v)] += -dir * col_[i];
+        }
+      };
+      make_ray();
+      if (!check_unbounded_ray(checked_model(), ray_, 1e-8).ok) {
+        ratio_test(1e-11);
+        if (r < 0) return EngineStatus::Unbounded;  // accept() will refuse an invalid ray
+      } else {
+        return EngineStatus::Unbounded;
       }
-      return EngineStatus::Unbounded;
     }
 
     if (boxed && (r < 0 || range <= t_exact)) {

@@ -193,8 +193,9 @@ class SimplexEngine {
   EngineStatus run_dual_simplex();
   Index choose_leaving_row(double* score) const;
   void compute_pivot_row();
-  bool select_entering(double sigma, double delta, double margin, double* theta_dual, Index* entering,
+  bool select_entering(double sigma, double delta, double margin, bool relaxed, double* theta_dual, Index* entering,
                        std::vector<Index>* flips);
+  bool farkas_valid();
   double ptol(double bound) const { return opt_.primal_tol * (1.0 + std::fabs(bound)); }
   void apply_bound_flips(const std::vector<Index>& flips, double* delta, Index r);
   void record_farkas(Index r);
@@ -253,6 +254,7 @@ class SimplexEngine {
 
   std::vector<double> farkas_, ray_;
   bool bounds_modified_ = false;
+  bool in_phase1_ = false;
   LpModel check_model_;
   double dual_objective_ = 0.0;
   double flip_objective_ = 0.0;
