@@ -30,3 +30,18 @@ mkdir -p data/raw/netlib
 # download an instance (for example afiro.mps) into data/raw/netlib/
 shodhan info data/raw/netlib/afiro.mps
 ```
+
+## Netlib LPs and the LP runner
+
+The original Netlib LP files (https://www.netlib.org/lp/data/) are distributed in a compressed form
+that needs a separate expander, the `emps` tool published next to them, before they are plain MPS files
+that SHODHAN can read. SHODHAN does not include the expander: compile `emps` yourself, expand each file
+into `data/raw/netlib/`, then run
+
+```sh
+python bench/run_lp_set.py data/raw/netlib --exe build/release/shodhan --timeout 300 --csv netlib.csv
+```
+
+To compare objectives, give a reference CSV with columns `name,objective` taken from a source you trust
+(the repository contains no reference values); the runner reports how many instances were solved, failed
+and mismatched at a relative tolerance of 1e-6.
