@@ -7,9 +7,9 @@
 //
 // For every seed the LP of that family is solved by the full pipeline and compared with the dense
 // oracle (statuses, objective within 1e-6 relative, KKT on the original model, certificates checked).
-// Mismatches are printed with their seeds. An objective that differs while both points pass the
-// KKT check is counted as "hypersensitive" when sum |y| * 1e-9 exceeds the comparison tolerance (see
-// docs/SIMPLEX.md); the harness prints those seeds too, so that they can be adjudicated with KASAUTI.
+// Mismatches are printed with their seeds. Seeds already decided by exact arithmetic
+// (tests/support/adjudicated_seeds.hpp) are compared with the exact answer instead of the oracle and
+// printed as ADJUDICATED; every other disagreement with the oracle is a mismatch.
 //
 // --emit-mps DIR writes the model of each seed as DIR/<family>_<seed>.mps instead of solving it
 // (to regenerate an instance for a certificate, for example).
@@ -30,6 +30,7 @@
 #include "shodhan/mps.hpp"
 #include "shodhan/rays.hpp"
 #include "support/dense_ref_lp.hpp"
+#include "support/adjudicated_seeds.hpp"
 #include "support/lp_families.hpp"
 
 using namespace shodhan;
@@ -38,7 +39,7 @@ using namespace shodhan::testing;
 namespace {
 
 struct Tally {
-  long long total = 0, agree = 0, inconclusive = 0, hypersensitive = 0, mismatches = 0;
+  long long total = 0, agree = 0, inconclusive = 0, mismatches = 0;
   long long optimal = 0, infeasible = 0, unbounded = 0;
 };
 
@@ -97,23 +98,29 @@ int main(int argc, char** argv) {
       }
       const LpResult r = LpSolver().solve(model);
       std::string why;
-      bool sensitive = false;
-      if (r.status != ref.status) {
+      const AdjudicatedSeed* adj = nullptr;
+      if (f == kWide) {
+        for (const AdjudicatedSeed& e : kAdjudicatedWideSeeds) {
+          if (static_cast<long long>(e.seed) == seed) adj = &e;
+        }
+      }
+      if (adj != nullptr) {
+        // Decided by exact arithmetic (tests/support/adjudicated_seeds.hpp): compare with that, not with the oracle.
+        if (adj->exact_status == 0) {
+          const double rel = std::fabs(r.solution.objective - adj->exact_objective) / (1.0 + std::fabs(adj->exact_objective));
+          if (r.status != Status::Optimal || !(rel <= adj->max_rel_error)) why = "differs from the exact answer";
+        } else if (r.status != Status::Unbounded && !(r.status == Status::NumericalError && !adj->pipeline_certifies)) {
+          why = "differs from the exact answer (unbounded)";
+        }
+        std::cout << "ADJUDICATED " << fam_arg << " seed " << seed << ": pipeline " << to_string(r.status) << ", exact " << (adj->exact_status == 0 ? "optimal" : "unbounded") << "\n";
+      } else if (r.status != ref.status) {
         why = std::string("status ") + to_string(r.status) + ", oracle " + to_string(ref.status) + " [" + r.message + "]";
       } else if (r.status == Status::Optimal) {
         ++t.optimal;
         const double rel = std::fabs(r.solution.objective - ref.solution.objective) / (1.0 + std::fabs(ref.solution.objective));
         const KktReport kr = check_kkt(model, r.solution, 1e-6);
-        double ysum = 0.0;
-        for (const double yv : r.solution.y) ysum += std::fabs(yv);
-        sensitive = ysum * 1e-9 > 1e-6 * (1.0 + std::fabs(ref.solution.objective));
         if (!kr.ok) why = "KKT on the original model failed: " + kr.summary();
-        else if (!(rel <= 1e-6) && !sensitive) why = "objective " + std::to_string(r.solution.objective) + " vs oracle " + std::to_string(ref.solution.objective);
-        else if (!(rel <= 1e-6)) {
-          ++t.hypersensitive;
-          std::cout << "HYPERSENSITIVE " << fam_arg << " seed " << seed << ": pipeline " << std::setprecision(15) << r.solution.objective << ", oracle "
-                    << ref.solution.objective << ", sum|y| " << ysum << "\n";
-        }
+        else if (!(rel <= 1e-6)) why = "objective " + std::to_string(r.solution.objective) + " vs oracle " + std::to_string(ref.solution.objective);
       } else if (r.status == Status::Infeasible) {
         ++t.infeasible;
         if (!check_farkas(model, r.farkas_ray, 1e-9).ok) why = "Farkas certificate does not check";
@@ -131,7 +138,7 @@ int main(int argc, char** argv) {
     }
     if (emit_dir.empty() || !quiet) {
       std::cout << family_name(f) << ": " << t.total << " seeds, " << t.agree << " agree (" << t.optimal << " optimal, " << t.infeasible << " infeasible, " << t.unbounded
-                << " unbounded), " << t.inconclusive << " oracle-inconclusive, " << t.hypersensitive << " hypersensitive, " << t.mismatches << " mismatches\n";
+                << " unbounded), " << t.inconclusive << " oracle-inconclusive, " << t.mismatches << " mismatches\n";
     }
   }
   return exit_code;
