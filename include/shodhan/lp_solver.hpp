@@ -56,6 +56,12 @@ struct LpResult {
   std::vector<double> farkas_ray;
   /// Unbounded: a direction (length n_cols) that passes check_unbounded_ray.
   std::vector<double> unbounded_ray;
+  /// Unbounded: a feasible point (length n_cols, original space) from which the ray
+  /// can be followed; with unbounded_ray it proves unboundedness.
+  std::vector<double> unbounded_point;
+  /// The configuration that produced the result, e.g. "presolve+scaling", "scaling",
+  /// "none"; "+tight" is appended when the tolerances were tightened.
+  std::string configuration;
   /// Human-readable remarks (fallbacks, why a status was downgraded, ...).
   std::string message;
 };

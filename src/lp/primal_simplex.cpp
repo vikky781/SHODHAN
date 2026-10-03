@@ -155,6 +155,7 @@ EngineStatus SimplexEngine::run_primal_simplex() {
       // claim it with a ray that checks; if not, basic variables with a tiny |alpha| that the
       // pivot threshold dropped may block after all, so look at them too.
       auto make_ray = [&]() {
+        point_.assign(x_.begin(), x_.begin() + n_);
         ray_.assign(to_size(n_), 0.0);
         if (q < n_) ray_[to_size(q)] = dir;
         for (const Index i : col_.indices()) {

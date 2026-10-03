@@ -176,6 +176,9 @@ class SimplexEngine {
   const std::vector<double>& farkas_ray() const { return farkas_; }
   /// Direction (length n) of an unbounded ray after Unbounded.
   const std::vector<double>& unbounded_ray() const { return ray_; }
+  /// A primal feasible point (length n, within the tolerances) from which the
+  /// ray was found; with the ray it proves unboundedness.
+  const std::vector<double>& unbounded_point() const { return point_; }
   /// Whether the working costs differ from the original ones.
   bool costs_modified() const { return costs_modified_; }
 
@@ -252,7 +255,7 @@ class SimplexEngine {
   std::vector<double> suffix_r_;
   std::vector<Index> flips_, banned_;
 
-  std::vector<double> farkas_, ray_;
+  std::vector<double> farkas_, ray_, point_;
   bool bounds_modified_ = false;
   bool in_phase1_ = false;
   LpModel check_model_;

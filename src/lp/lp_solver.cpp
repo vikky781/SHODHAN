@@ -25,7 +25,7 @@ struct Attempt {
   bool needs_confirm = false;   // a status that cannot be certified in this configuration (presolve involved)
   Solution solution;
   KktReport kkt;
-  std::vector<double> farkas, ray;
+  std::vector<double> farkas, ray, point;
   long long iterations = 0, phase1 = 0, primal = 0;
   int refactors = 0;
   bool perturbed = false;
@@ -162,11 +162,14 @@ Attempt run_attempt(const LpModel& model, const LpOptions& opt, bool use_presolv
         break;
       }
       std::vector<double> r = engine.unbounded_ray();
+      std::vector<double> pt = engine.unbounded_point();
       if (use_scaling) {
         for (std::size_t j = 0; j < r.size(); ++j) r[j] *= sc.col_scale[j];
+        for (std::size_t j = 0; j < pt.size(); ++j) pt[j] *= sc.col_scale[j];
       }
-      a.verified = check_unbounded_ray(model, r, 1e-7).ok;
+      a.verified = check_unbounded_ray(model, r, 1e-7).ok && max_relative_violation(model, pt) <= opt.kkt_tol;
       a.ray = r;
+      a.point = pt;
       if (!a.verified) {
         a.status = Status::NumericalError;
         a.message = "the unbounded ray failed the check on the original model";
@@ -248,6 +251,9 @@ LpResult LpSolver::solve(const LpModel& model) const {
       res.kkt = a.kkt;
       res.farkas_ray = a.farkas;
       res.unbounded_ray = a.ray;
+      res.unbounded_point = a.point;
+      res.configuration = std::string(ladder[k].presolve ? "presolve" : "") + (ladder[k].presolve && ladder[k].scaling ? "+" : "") +
+                          (ladder[k].scaling ? "scaling" : (ladder[k].presolve ? "" : "none")) + (ladder[k].tight < 1.0 ? "+tight" : "");
       break;
     }
     if (a.status == Status::TimeLimit || a.status == Status::IterationLimit) {

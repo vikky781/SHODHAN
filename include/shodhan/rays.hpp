@@ -39,4 +39,9 @@ RayCheck check_farkas(const LpModel& model, const std::vector<double>& y, double
 /// is not checked here.
 RayCheck check_unbounded_ray(const LpModel& model, const std::vector<double>& ray, double tol);
 
+/// Largest relative violation of the row and column bounds by x (length n_cols):
+/// violation / (1 + |bound|). 0 for a feasible point; the empty vector counts as
+/// infinitely violating when the model has columns.
+double max_relative_violation(const LpModel& model, const std::vector<double>& x);
+
 }  // namespace shodhan

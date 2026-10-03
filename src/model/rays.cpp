@@ -146,3 +146,31 @@ RayCheck check_unbounded_ray(const LpModel& model, const std::vector<double>& ra
 }
 
 }  // namespace shodhan
+
+namespace shodhan {
+
+double max_relative_violation(const LpModel& model, const std::vector<double>& x) {
+  if (x.size() != to_size(model.n_cols)) return kInf;
+  double worst = 0.0;
+  for (Index j = 0; j < model.n_cols; ++j) {
+    const double v = x[to_size(j)];
+    const double lo = model.col_lower[to_size(j)], hi = model.col_upper[to_size(j)];
+    if (!is_inf(lo) && v < lo) worst = std::max(worst, (lo - v) / (1.0 + std::fabs(lo)));
+    if (!is_inf(hi) && v > hi) worst = std::max(worst, (v - hi) / (1.0 + std::fabs(hi)));
+  }
+  std::vector<double> ax(to_size(model.n_rows), 0.0);
+  for (Index j = 0; j < model.n_cols; ++j) {
+    for (Index t = model.A.col_start[to_size(j)]; t < model.A.col_start[to_size(j) + 1]; ++t) {
+      ax[to_size(model.A.row_index[to_size(t)])] += model.A.value[to_size(t)] * x[to_size(j)];
+    }
+  }
+  for (Index i = 0; i < model.n_rows; ++i) {
+    const double lo = model.row_lower[to_size(i)], hi = model.row_upper[to_size(i)];
+    const double v = ax[to_size(i)];
+    if (!is_inf(lo) && v < lo) worst = std::max(worst, (lo - v) / (1.0 + std::fabs(lo)));
+    if (!is_inf(hi) && v > hi) worst = std::max(worst, (v - hi) / (1.0 + std::fabs(hi)));
+  }
+  return worst;
+}
+
+}  // namespace shodhan
