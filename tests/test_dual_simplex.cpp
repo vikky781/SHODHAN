@@ -225,3 +225,34 @@ TEST_CASE(dual_simplex_set_basis_uses_exact_weights) {
   for (const double w : f.weights()) all_one = all_one && w == 1.0;
   CHECK(!all_one);
 }
+
+TEST_CASE(dual_simplex_bound_flipping_ratio_test_matches_the_oracle) {
+  Tally t;
+  long long flips = 0;
+  for (std::uint64_t seed = 1; seed <= 600; ++seed) {
+    SimplexLpOptions o;
+    o.rows = 3 + static_cast<int>(seed % 12);
+    o.cols = 6 + static_cast<int>(seed % 20);
+    o.density = 0.15 + 0.05 * static_cast<double>(seed % 6);
+    o.boxed_fraction = 0.5 + 0.1 * static_cast<double>(seed % 4);  // many boxed variables: flips happen
+    o.feasible = seed % 7 != 0;
+    const LpModel model = make_simplex_lp(seed, o);
+    SimplexOptions opt = textbook_options();
+    opt.bound_flipping = true;
+    const std::string why = compare(model, opt, &t);
+    {
+      SimplexEngine e(model, opt);
+      e.solve();
+      flips += e.stats().bound_flips;
+    }
+    if (!why.empty()) {
+      ++t.failed;
+      std::cerr << "FAILING SEED " << seed << ": " << why << "\n";
+      CHECK(false);
+    }
+  }
+  std::cout << "    dual simplex (bound flipping): " << t.total << " LPs, " << t.optimal << " optimal, " << t.infeasible
+            << " infeasible, " << t.failed << " failed; " << flips << " bound flips performed, " << t.iterations << " iterations\n";
+  CHECK_EQ(t.failed, 0);
+  CHECK(flips > 100);
+}

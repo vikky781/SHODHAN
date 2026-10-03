@@ -22,6 +22,9 @@ namespace shodhan {
 
 namespace {
 
+// A reduced cost of the wrong sign by more than this is removed by shifting its cost.
+constexpr double kShiftTol = 1e-11;
+
 // Loads the column of variable j (structural or logical) as a row-space vector.
 void load_column(const SparseMatrix& A, Index n, Index j, SparseWork& w) {
   w.clear();
@@ -39,13 +42,12 @@ void load_column(const SparseMatrix& A, Index n, Index j, SparseWork& w) {
 Index SimplexEngine::choose_leaving_row(double* score_out) const {
   Index best = -1;
   double best_score = 0.0;
-  const double tol = opt_.primal_tol;
   for (Index p = 0; p < m_; ++p) {
     const Index v = basis_[to_size(p)];
     const double x = x_[to_size(v)];
     double viol = 0.0;
-    if (x < lo_[to_size(v)] - tol) viol = lo_[to_size(v)] - x;
-    else if (x > hi_[to_size(v)] + tol) viol = x - hi_[to_size(v)];
+    if (x < lo_[to_size(v)] - ptol(lo_[to_size(v)])) viol = lo_[to_size(v)] - x;
+    else if (x > hi_[to_size(v)] + ptol(hi_[to_size(v)])) viol = x - hi_[to_size(v)];
     else continue;
     const double score = viol * viol / weights_[to_size(p)];
     if (score > best_score) {
@@ -73,44 +75,108 @@ void SimplexEngine::compute_pivot_row() {
   }
 }
 
-bool SimplexEngine::select_entering(double sigma, double delta, double* theta_dual, Index* entering,
+// Ratio test. Candidates are the nonbasic variables that block the dual step
+// (see the notation above); candidate j has the exact breakpoint
+//   t_j = max(s_j, 0) / |alpha_j|,       s_j = d_j (at lower), -d_j (at upper), 0 (free),
+// and, for Harris, the relaxed breakpoint  r_j = (s_j + tol) / |alpha_j|.
+//
+// Candidates are sorted by t_j. Harris pass 1: theta_max = min r_j over the
+// remaining candidates; the group K holds those with t_j <= theta_max. With
+// bound flipping, a group of boxed candidates whose bound flips keep the slope
+// of the dual objective positive,
+//   slope -= sum_{j in K} |alpha_j| (hi_j - lo_j) > 0,
+// is passed (all its variables flip) and the search continues; otherwise the
+// entering variable is the one of K with the largest |alpha_j| (Harris pass 2).
+bool SimplexEngine::select_entering(double sigma, double delta, double margin, double* theta_dual, Index* entering,
                                     std::vector<Index>* flips) {
-  (void)delta;
   flips->clear();
-  Index best = -1;
-  double best_ratio = 0.0, best_abs = 0.0;
-  for (const Index j : row_alpha_.indices()) {
-    const double a = row_alpha_[j];
-    const double abar = sigma * a;
-    if (std::fabs(a) < opt_.min_pivot_abs) continue;
-    if (std::find(banned_.begin(), banned_.end(), j) != banned_.end()) continue;
-    double ratio;
-    switch (status_[to_size(j)]) {
-      case VarStatus::AtLower:
-        if (!(abar < 0.0)) continue;
-        ratio = std::max(d_[to_size(j)], 0.0) / -abar;
-        break;
-      case VarStatus::AtUpper:
-        if (!(abar > 0.0)) continue;
-        ratio = std::max(-d_[to_size(j)], 0.0) / abar;
-        break;
-      case VarStatus::FreeAtZero:
-        ratio = 0.0;
-        break;
-      default:
-        continue;
+  double amax = 0.0;
+  for (const Index j : row_alpha_.indices()) amax = std::max(amax, std::fabs(row_alpha_[j]));
+  const double tol = opt_.harris ? 0.5 * opt_.dual_tol : 0.0;
+
+  auto collect = [&](double threshold) {
+    cand_.clear();
+    for (const Index j : row_alpha_.indices()) {
+      const double a = row_alpha_[j];
+      const double aa = std::fabs(a);
+      if (aa < threshold) continue;
+      if (!banned_.empty() && std::find(banned_.begin(), banned_.end(), j) != banned_.end()) continue;
+      const double abar = sigma * a;
+      double s;
+      switch (status_[to_size(j)]) {
+        case VarStatus::AtLower:
+          if (!(abar < 0.0)) continue;
+          s = d_[to_size(j)];
+          break;
+        case VarStatus::AtUpper:
+          if (!(abar > 0.0)) continue;
+          s = -d_[to_size(j)];
+          break;
+        case VarStatus::FreeAtZero:
+          s = 0.0;
+          break;
+        default:
+          continue;
+      }
+      const double range = hi_[to_size(j)] - lo_[to_size(j)];
+      const bool boxed = !is_inf(lo_[to_size(j)]) && !is_inf(hi_[to_size(j)]);
+      cand_.push_back({std::max(s, 0.0) / aa, (std::max(s, 0.0) + tol) / aa, aa, boxed ? range : kInf, j});
     }
-    const double aa = std::fabs(a);
-    const bool take = best < 0 || ratio < best_ratio || (ratio == best_ratio && (aa > best_abs || (aa == best_abs && j < best)));
-    if (take) {
-      best = j;
-      best_ratio = ratio;
-      best_abs = aa;
+  };
+  collect(std::max(opt_.min_pivot_abs, opt_.min_pivot_rel * amax));
+  if (cand_.empty()) collect(opt_.min_pivot_abs);  // relative threshold removed everything
+  if (cand_.empty()) return false;
+
+  std::sort(cand_.begin(), cand_.end(), [](const Candidate& a, const Candidate& b) {
+    return a.t < b.t || (a.t == b.t && (a.abs_alpha > b.abs_alpha || (a.abs_alpha == b.abs_alpha && a.var < b.var)));
+  });
+  const std::size_t nc = cand_.size();
+  suffix_r_.assign(nc + 1, kInf);
+  for (std::size_t k = nc; k-- > 0;) suffix_r_[k] = std::min(suffix_r_[k + 1], cand_[k].r);
+
+  double slope = std::fabs(delta);
+  std::size_t ptr = 0;
+  std::size_t end = 0;
+  for (;;) {
+    const double theta_max = suffix_r_[ptr];
+    end = ptr;
+    double decrease = 0.0;
+    while (end < nc && cand_[end].t <= theta_max) {
+      decrease += cand_[end].abs_alpha * cand_[end].range;
+      ++end;
+    }
+    if (end == ptr) end = ptr + 1;  // cannot happen (the minimizer of r has t <= r), kept for safety
+    const bool can_pass = opt_.bound_flipping && std::isfinite(decrease) && decrease < kInf &&
+                          slope - decrease > margin && end < nc;
+    if (!can_pass) {
+      // The last group is selected, unless it is the end and everything before could be flipped:
+      break;
+    }
+    slope -= decrease;
+    for (std::size_t k = ptr; k < end; ++k) flips->push_back(cand_[k].var);
+    ptr = end;
+  }
+  // Entering: largest |alpha| in the group [ptr, end).
+  std::size_t best = ptr;
+  for (std::size_t k = ptr + 1; k < end; ++k) {
+    if (cand_[k].abs_alpha > cand_[best].abs_alpha ||
+        (cand_[k].abs_alpha == cand_[best].abs_alpha && cand_[k].var < cand_[best].var)) {
+      best = k;
     }
   }
-  if (best < 0) return false;
-  *entering = best;
-  *theta_dual = best_ratio;
+  // If the whole candidate set was passed with positive slope left, the row is infeasible (all
+  // boxed variables sit at the bound that helps most and x_p still violates its bound): that is
+  // only possible when `end == nc` and every member could be flipped.
+  if (opt_.bound_flipping && end == nc && std::isfinite(cand_[best].range)) {
+    double decrease = 0.0;
+    for (std::size_t k = ptr; k < end; ++k) decrease += cand_[k].abs_alpha * cand_[k].range;
+    if (std::isfinite(decrease) && slope - decrease > margin) {
+      for (std::size_t k = ptr; k < end; ++k) flips->push_back(cand_[k].var);
+      return false;  // dual unbounded: primal infeasible
+    }
+  }
+  *entering = cand_[best].var;
+  *theta_dual = cand_[best].t;
   return true;
 }
 
@@ -139,6 +205,7 @@ bool SimplexEngine::refactor_and_recompute() {
   compute_dual();
   fix_dual_infeasibilities(true);
   if (primal_stale_) compute_primal();
+  dual_objective_ = working_objective();
   if (stats_.basis_repairs == repairs_before && basis_old == basis_) {
     double err = 0.0;
     for (Index p = 0; p < m_; ++p) {
@@ -178,6 +245,10 @@ void SimplexEngine::update_weights(Index r, double alpha_r) {
 EngineStatus SimplexEngine::run_dual_simplex() {
   trouble_run_ = 0;
   banned_.clear();
+  dual_objective_ = working_objective();
+  best_dual_objective_ = dual_objective_;
+  last_progress_iter_ = stats_.iterations;
+  stall_rounds_ = 0;
   for (;;) {
     if (stats_.iterations >= opt_.iteration_limit) return EngineStatus::IterationLimit;
     if (time_exceeded()) return EngineStatus::TimeLimit;
@@ -215,7 +286,8 @@ EngineStatus SimplexEngine::run_dual_simplex() {
 
     double theta = 0.0;
     Index q = -1;
-    if (!select_entering(sigma, delta, &theta, &q, &flips_)) {
+    const double margin = 0.5 * ptol(bound);
+    if (!select_entering(sigma, delta, margin, &theta, &q, &flips_)) {
       if (updates_since_refactor_ > 0) {  // verify with a fresh factorization first
         if (!refactor_and_recompute()) return EngineStatus::NumericalError;
         continue;
@@ -247,23 +319,52 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     }
     if (!flips_.empty()) apply_bound_flips(flips_, &delta, r);
 
-    // Dual update.
+    // Dual update. Flipped variables have just moved to their other bound; the step carries
+    // their reduced costs to the sign that bound requires. A Harris step can leave a reduced
+    // cost wrong-signed by at most the tolerance: its cost is shifted so that d_j = 0.
     const double step = sigma * theta;
     for (const Index j : row_alpha_.indices()) {
       if (j == q) continue;
-      d_[to_size(j)] += step * row_alpha_[j];
+      const double dj = d_[to_size(j)] + step * row_alpha_[j];
+      d_[to_size(j)] = dj;
+      bool wrong = false;
+      switch (status_[to_size(j)]) {
+        case VarStatus::AtLower: wrong = dj < -kShiftTol; break;
+        case VarStatus::AtUpper: wrong = dj > kShiftTol; break;
+        case VarStatus::FreeAtZero: wrong = std::fabs(dj) > kShiftTol; break;
+        default: break;
+      }
+      if (wrong) {
+        cost_[to_size(j)] -= dj;
+        d_[to_size(j)] = 0.0;
+        costs_modified_ = true;
+        ++stats_.cost_shifts;
+      }
     }
-    d_[to_size(q)] = 0.0;
+    {
+      const double dq = d_[to_size(q)] + step * row_alpha_[q];
+      if (std::fabs(dq) > kShiftTol) {  // only when theta was clamped at 0
+        cost_[to_size(q)] -= dq;
+        costs_modified_ = true;
+        ++stats_.cost_shifts;
+      }
+      d_[to_size(q)] = 0.0;
+    }
     d_[to_size(p)] = step;
 
-    // Primal update.
+    // Primal update (and the change of the dual objective c^T x it causes).
     const double t = delta / alpha_c;
+    double dobj = cost_[to_size(q)] * t + cost_[to_size(p)] * (bound - x_[to_size(p)]);
     for (const Index i : col_.indices()) {
       if (i == r) continue;
-      x_[to_size(basis_[to_size(i)])] -= t * col_[i];
+      const Index bv = basis_[to_size(i)];
+      x_[to_size(bv)] -= t * col_[i];
+      dobj -= cost_[to_size(bv)] * t * col_[i];
     }
     x_[to_size(q)] += t;
     x_[to_size(p)] = bound;
+    dual_objective_ += dobj + flip_objective_;
+    flip_objective_ = 0.0;
 
     if (opt_.dual_steepest_edge) update_weights(r, alpha_c);
 
@@ -284,15 +385,59 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     } else if (!refactor_and_recompute()) {
       return EngineStatus::NumericalError;
     }
+    // Stall detection: no progress of the dual objective for a long time.
+    if (dual_objective_ > best_dual_objective_ + 1e-9 * (1.0 + std::fabs(best_dual_objective_))) {
+      best_dual_objective_ = dual_objective_;
+      last_progress_iter_ = stats_.iterations;
+    } else if (stats_.iterations - last_progress_iter_ >= opt_.stall_iterations) {
+      if (opt_.perturb && stall_rounds_ < 5) {
+        perturb_costs(std::pow(10.0, stall_rounds_ + 1));
+        dual_objective_ = working_objective();
+        best_dual_objective_ = dual_objective_;
+      }
+      ++stall_rounds_;
+      last_progress_iter_ = stats_.iterations;
+    }
     if (opt_.verbosity > 0 && stats_.iterations % std::max(1, opt_.log_interval) == 0) log_line("dual", objective());
   }
 }
 
+// Moves the flipped variables to their other bound and updates x_B with one ftran of the
+// combined change: x_B -= B^-1 (sum_j a_j * change_j). Returns the new infeasibility of the
+// leaving variable through delta.
 void SimplexEngine::apply_bound_flips(const std::vector<Index>& flips, double* delta, Index r) {
-  // Filled in with the bound flipping ratio test.
-  (void)flips;
-  (void)delta;
-  (void)r;
+  rhs_.clear();
+  flip_objective_ = 0.0;
+  for (const Index j : flips) {
+    double change;
+    if (status_[to_size(j)] == VarStatus::AtLower) {
+      change = hi_[to_size(j)] - lo_[to_size(j)];
+      status_[to_size(j)] = VarStatus::AtUpper;
+      x_[to_size(j)] = hi_[to_size(j)];
+    } else {
+      change = lo_[to_size(j)] - hi_[to_size(j)];
+      status_[to_size(j)] = VarStatus::AtLower;
+      x_[to_size(j)] = lo_[to_size(j)];
+    }
+    flip_objective_ += cost_[to_size(j)] * change;
+    if (j < n_) {
+      for (Index t = model_.A.col_start[to_size(j)]; t < model_.A.col_start[to_size(j) + 1]; ++t) {
+        rhs_.add(model_.A.row_index[to_size(t)], model_.A.value[to_size(t)] * change);
+      }
+    } else {
+      rhs_.add(j - n_, -change);
+    }
+  }
+  factor_.ftran(rhs_, false);
+  for (const Index i : rhs_.indices()) {
+    const Index bv = basis_[to_size(i)];
+    x_[to_size(bv)] -= rhs_[i];
+    flip_objective_ -= cost_[to_size(bv)] * rhs_[i];
+  }
+  stats_.bound_flips += static_cast<long long>(flips.size());
+  const Index p = basis_[to_size(r)];
+  const double xp = x_[to_size(p)];
+  *delta = *delta < 0.0 ? xp - lo_[to_size(p)] : xp - hi_[to_size(p)];  // same side as before the flips
 }
 
 }  // namespace shodhan

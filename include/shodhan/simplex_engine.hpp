@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <iosfwd>
 #include <vector>
@@ -37,7 +38,9 @@ const char* to_string(EngineStatus status) noexcept;
 
 /// Tunable parameters. Values are defaults/targets, not guarantees.
 struct SimplexOptions {
-  double primal_tol = 1e-6;  ///< absolute bound violation accepted for a basic variable
+  /// Bound violation accepted for a basic variable, relative to the bound: a violation of at
+  /// most primal_tol * (1 + |bound|) is tolerated (the same measure as check_kkt).
+  double primal_tol = 1e-6;
   double dual_tol = 1e-6;    ///< wrong-signed reduced cost accepted
   double time_limit = kInf;  ///< seconds
   long long iteration_limit = 100000000;
@@ -56,7 +59,10 @@ struct SimplexOptions {
   double min_pivot_abs = 1e-9;     ///< smallest acceptable |alpha| in the ratio test (target)
   double min_pivot_rel = 1e-7;     ///< ... relative to the largest |alpha| in the row (target)
 
-  bool perturb = true;             ///< cost perturbation against dual degeneracy
+  bool perturb = true;             ///< cost perturbation against dual degeneracy (start of phase 2 and stalls)
+  bool perturb_at_start = true;    ///< false: only perturb when a stall is detected
+  bool polish = true;              ///< after optimality, remove tolerated-but-visible violations
+  double polish_tol = 1e-13;       ///< tolerance (primal relative, dual absolute) the polishing pass aims for (target)
   double perturb_scale = 5e-7;     ///< relative size of the initial perturbation (target)
   std::uint64_t seed = 0;
   long long stall_iterations = 500;  ///< iterations without dual objective progress before a larger perturbation (target)
@@ -187,13 +193,22 @@ class SimplexEngine {
   EngineStatus run_dual_simplex();
   Index choose_leaving_row(double* score) const;
   void compute_pivot_row();
-  bool select_entering(double sigma, double delta, double* theta_dual, Index* entering,
+  bool select_entering(double sigma, double delta, double margin, double* theta_dual, Index* entering,
                        std::vector<Index>* flips);
+  double ptol(double bound) const { return opt_.primal_tol * (1.0 + std::fabs(bound)); }
   void apply_bound_flips(const std::vector<Index>& flips, double* delta, Index r);
   void record_farkas(Index r);
   bool handle_trouble(const char* what);
   bool refactor_and_recompute();
   void update_weights(Index r, double alpha_r);
+
+  // primal simplex (src/lp/primal_simplex.cpp)
+  EngineStatus run_primal_simplex();
+  bool refresh_after_refactor_primal();
+
+  // perturbation and cleanup (src/lp/engine_solve.cpp)
+  void perturb_costs(double multiplier);
+  EngineStatus finish_after_dual();
 
   SimplexOptions opt_;
   const LpModel& model_;
@@ -218,11 +233,23 @@ class SimplexEngine {
 
   // work vectors
   SparseWork rho_, col_, tau_, rhs_, row_alpha_;
-  std::vector<Index> candidates_, flips_, banned_;
-  std::vector<double> cand_ratio_;
+  struct Candidate {
+    double t;          ///< exact breakpoint
+    double r;          ///< Harris-relaxed breakpoint
+    double abs_alpha;
+    double range;      ///< hi - lo (infinite unless boxed)
+    Index var;
+  };
+  std::vector<Candidate> cand_;
+  std::vector<double> suffix_r_;
+  std::vector<Index> flips_, banned_;
 
   std::vector<double> farkas_, ray_;
   double dual_objective_ = 0.0;
+  double flip_objective_ = 0.0;
+  double best_dual_objective_ = 0.0;
+  long long last_progress_iter_ = 0;
+  int stall_rounds_ = 0;
   Index last_leaving_ = -1;
 };
 

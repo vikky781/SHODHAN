@@ -262,10 +262,15 @@ InfeasibilitySummary SimplexEngine::infeasibility() const {
   for (Index p = 0; p < m_; ++p) {
     const Index v = basis_[to_size(p)];
     const double x = x_[to_size(v)];
-    double viol = 0.0;
-    if (x < lo_[to_size(v)]) viol = lo_[to_size(v)] - x;
-    else if (x > hi_[to_size(v)]) viol = x - hi_[to_size(v)];
-    if (viol > opt_.primal_tol) {
+    double viol = 0.0, bound = 0.0;
+    if (x < lo_[to_size(v)]) {
+      viol = lo_[to_size(v)] - x;
+      bound = lo_[to_size(v)];
+    } else if (x > hi_[to_size(v)]) {
+      viol = x - hi_[to_size(v)];
+      bound = hi_[to_size(v)];
+    }
+    if (viol > ptol(bound)) {
       s.primal_sum += viol;
       s.primal_max = std::max(s.primal_max, viol);
       ++s.primal_count;

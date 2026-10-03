@@ -73,3 +73,77 @@ w_r' = max( w_r / alpha_r^2 , 1e-4 )
 where `w_r` is recomputed exactly as `||rho_r||^2` at the pivot. Derivation: the rows of `B^-1` change as
 `rho_i' = rho_i - (alpha_i/alpha_r) rho_r` and `rho_r' = rho_r / alpha_r`, and `rho_i . rho_r = (B^-1 rho_r)_i = tau_i`.
 A test compares the updated weights with the exactly computed ones after four iterations.
+
+## 4. Ratio test: bound flipping and Harris
+
+The ratio test of section 2 is the textbook one. The default test combines the bound flipping ("long-step")
+ratio test with Harris's two passes (Koberstein 2005, Maros 2003).
+
+For the candidate set (variables that block the dual step) define `s_j = d_j` (at lower), `-d_j` (at upper), 0
+(free), the exact breakpoint `t_j = max(s_j, 0) / |alpha_j|` and the relaxed one
+`r_j = (max(s_j, 0) + tol) / |alpha_j|`, with `tol = dual_tol / 2` (Harris on) or 0 (off).
+
+1. Candidates with `|alpha_j| < max(min_pivot_abs, min_pivot_rel * max_k |alpha_k|)` are dropped (defaults 1e-9 and
+   1e-7, targets); if that removes all of them, the relative threshold is dropped.
+2. Candidates are sorted by `t_j`. **Harris pass 1:** `theta_max` is the smallest `r_j` among the remaining
+   ones, and the group `K` holds those with `t_j <= theta_max`.
+3. **Bound flipping:** the slope of the dual objective along the step starts at `|delta|` (the infeasibility of
+   the leaving variable). Passing a boxed candidate `j` lowers it by `|alpha_j| (hi_j - lo_j)`. If the slope
+   stays above a margin `0.5 * primal_tol * (1 + |bound|)` after passing all of `K`, the variables of `K`
+   are flipped to their other bound and the search continues with the remaining candidates; a variable that is
+   not boxed stops the search (its slope decrease is infinite).
+4. **Harris pass 2:** the entering variable is the member of the final group with the largest `|alpha_j|`
+   (ties: smaller index), and `theta = t_q`.
+5. If every candidate is passed and the slope is still above the margin, the row cannot be repaired: primal
+   infeasibility (section 8).
+
+The flips change `x_B` by `-B^-1 sum_j a_j * change_j`, done with one ftran of the combined column; the
+infeasibility `delta` of the leaving variable is recomputed from the updated `x_p`, and the pivot then proceeds
+with that `delta`. The entering column is computed and checked before the flips are applied, so a rejected pivot
+leaves the state untouched.
+
+After the step, `d_j += sigma*theta*alpha_j`. A nonbasic `d_j` that ends up wrong-signed by more than 1e-11
+(possible by at most the Harris tolerance, or when `theta` had to be clamped at 0) is removed by **cost
+shifting**: `c_j -= d_j`, `d_j = 0`. Shifted costs are part of the working costs and are removed with the
+perturbation (section 6).
+
+## 5. Tolerances
+
+The primal tolerance is **relative to the violated bound**: a bound is violated when the violation exceeds
+`primal_tol * (1 + |bound|)` (default `primal_tol` 1e-6), which is the measure `check_kkt` uses. An absolute
+tolerance would mistake rounding noise for infeasibility on rows whose values are large; with absolute margins a
+test LP with coefficients between 1e-4 and 1e4 was declared infeasible by a 3e-6 rounding difference on a row of
+scale 1e4. The dual tolerance `dual_tol` (default 1e-6) is absolute, on the scaled model.
+
+**Polishing.** After optimality, violations below the tolerances can still be visible after unscaling and
+change the objective when the multipliers are large. The engine tightens both tolerances to `polish_tol`
+(default 1e-13, target) and lets the dual simplex (remaining primal violations) or the primal simplex (remaining
+dual violations) finish, with a cap of `100 + 2m` iterations so that noise cannot make it loop. The normal
+tolerances are then restored and checked again.
+
+## 6. Perturbation, stalling and cleanup
+
+**Perturbation** (on by default, `perturb`). At the start of phase 2 the cost of every nonbasic structural
+variable at a bound moves away from dual infeasibility: `+xi_j` at a lower bound, `-xi_j` at an upper bound, with
+`xi_j = perturb_scale * (1 + |c_j|) * (1 + u_j)`, `u_j` uniform in `[0,1)` from a deterministic generator seeded
+by `seed` and the perturbation count (`perturb_scale` default 5e-7, target). Free and fixed variables are not
+perturbed. `d_j` changes by exactly the same amount.
+
+**Stall detection.** The dual objective `c^T x` is tracked incrementally (including the effect of flips). If it
+does not improve for `stall_iterations` iterations (default 500, target), a larger perturbation (10, 100, ...
+times the base scale, at most five times) is applied.
+
+**Removal and cleanup.** When the dual simplex ends optimal, the original costs are restored, the basis is
+refactorized, and `x_B`, `y`, `d` are recomputed from scratch. If the point is primal and dual feasible within
+the tolerances it is optimal. If there are dual infeasibilities (the basis is primal feasible: bounds do not
+depend on the costs), the **primal simplex** removes them; primal infeasibilities with dual feasibility go back
+to the dual simplex. The loop is bounded by `max_cleanup_rounds` (default 5, target) and then reports
+`NumericalError`.
+
+**Primal simplex** (a cleanup engine, not the main one). Dantzig pricing on the dual infeasibility; the entering
+column `alpha = B^-1 a_q`; a Harris two-pass ratio test over the basic variables (relative tolerance
+`0.5 * primal_tol`), choosing among ties the largest `|alpha|`; a bound flip when the entering variable's own
+range is shorter than every ratio; Bland's rule (smallest index) after 100 degenerate steps in a row. The dual
+update after a pivot in row `r` is `d_j -= (d_q / alpha_r) alpha_rj`, `d_p = -d_q / alpha_r`. If no basic
+variable blocks and the entering variable is not boxed, the problem is unbounded and the direction is kept
+(section 8).
