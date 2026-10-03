@@ -155,6 +155,9 @@ EngineStatus SimplexEngine::run_primal_simplex() {
       // claim it with a ray that checks; if not, basic variables with a tiny |alpha| that the
       // pivot threshold dropped may block after all, so look at them too.
       auto make_ray = [&]() {
+        // The point of an unbounded certificate must be feasible: take it from a fresh factorization, not
+        // from the incrementally updated primal values, which drift on ill-conditioned bases.
+        if (updates_since_refactor_ > 0) refresh_after_refactor_primal();
         point_.assign(x_.begin(), x_.begin() + n_);
         ray_.assign(to_size(n_), 0.0);
         if (q < n_) ray_[to_size(q)] = dir;
