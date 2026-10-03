@@ -203,6 +203,10 @@ void SimplexEngine::compute_dual() {
   }
   factor_.btran(rhs_);
   for (Index i = 0; i < m_; ++i) y_[to_size(i)] = rhs_[i];
+  update_duals_from_y();
+}
+
+void SimplexEngine::update_duals_from_y() {
   for (Index j = 0; j < n_; ++j) {
     if (status_[to_size(j)] == VarStatus::Basic) {
       d_[to_size(j)] = 0.0;
@@ -319,6 +323,7 @@ void SimplexEngine::change_col_bounds(Index j, double lo, double hi) {
   if (lo > hi) throw std::invalid_argument("SimplexEngine::change_col_bounds: lo > hi");
   lo_[to_size(j)] = lo;
   hi_[to_size(j)] = hi;
+  bounds_modified_ = true;
   if (status_[to_size(j)] != VarStatus::Basic) {
     set_status_from_bounds(j, d_[to_size(j)] < 0.0);
     x_[to_size(j)] = nonbasic_value(j);
@@ -332,6 +337,7 @@ void SimplexEngine::change_row_bounds(Index i, double lo, double hi) {
   const Index j = n_ + i;
   lo_[to_size(j)] = lo;
   hi_[to_size(j)] = hi;
+  bounds_modified_ = true;
   if (status_[to_size(j)] != VarStatus::Basic) {
     set_status_from_bounds(j, d_[to_size(j)] < 0.0);
     x_[to_size(j)] = nonbasic_value(j);

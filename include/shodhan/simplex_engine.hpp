@@ -206,9 +206,16 @@ class SimplexEngine {
   EngineStatus run_primal_simplex();
   bool refresh_after_refactor_primal();
 
-  // perturbation and cleanup (src/lp/engine_solve.cpp)
+  // driver (src/lp/engine_solve.cpp)
   void perturb_costs(double multiplier);
   EngineStatus finish_after_dual();
+  EngineStatus phase2();
+  EngineStatus run_dual_phase1(bool* dual_feasible);
+  EngineStatus resolve_dual_infeasible();
+  EngineStatus accept(EngineStatus status);
+  void refine_solution(int rounds);
+  void update_duals_from_y();
+  const LpModel& checked_model();
 
   SimplexOptions opt_;
   const LpModel& model_;
@@ -245,6 +252,8 @@ class SimplexEngine {
   std::vector<Index> flips_, banned_;
 
   std::vector<double> farkas_, ray_;
+  bool bounds_modified_ = false;
+  LpModel check_model_;
   double dual_objective_ = 0.0;
   double flip_objective_ = 0.0;
   double best_dual_objective_ = 0.0;

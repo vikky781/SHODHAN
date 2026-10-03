@@ -147,3 +147,67 @@ range is shorter than every ratio; Bland's rule (smallest index) after 100 degen
 update after a pivot in row `r` is `d_j -= (d_q / alpha_r) alpha_rj`, `d_p = -d_q / alpha_r`. If no basic
 variable blocks and the entering variable is not boxed, the problem is unbounded and the direction is kept
 (section 8).
+
+## 7. Dual phase 1 and infeasible or unbounded problems
+
+If some nonbasic reduced cost has the wrong sign for its status after the boxed variables were placed (a free
+variable with a cost, a lower bounded one with a negative cost, ...), the basis is not dual feasible.
+
+**Phase 1** (Koberstein's artificial bounds subproblem). Replace the bounds of every variable, including the
+logicals, by `[-1000, 1000]` (free; `artificial_bound`, target), `[0, 1]` (lower bounded only), `[-1, 0]` (upper
+bounded only) or `[0, 0]` (boxed or fixed), place each nonbasic variable at the bound its reduced cost favours
+(every variable is boxed, so the basis is dual feasible) and solve `min c^T x` with the same dual simplex (without
+Harris, perturbation or polishing). The subproblem is feasible (`x = 0`) and bounded, so it always ends optimal
+(anything else is reported as a numerical failure). The real bounds are then restored and each nonbasic variable
+gets its real status from the sign of `d_j`; the basis is dual feasible for the original problem exactly when no
+variable remains wrong-signed, i.e. when the optimum of the subproblem is zero. Phase 1 iterations are counted
+in `SimplexStats::phase1_iterations`.
+
+**Dual infeasible: infeasible or unbounded.** If phase 1 does not reach a dual feasible basis the LP is infeasible
+or unbounded. It is resolved:
+
+1. Replace all costs by zero (every basis is dual feasible) and run phase 2. If the dual simplex proves primal
+   infeasibility, the LP is `Infeasible`; the certificate does not depend on the costs.
+2. Otherwise the basis found is primal feasible. Run the primal simplex with the true costs from it. If it ends
+   optimal the dual infeasibility was a tolerance artifact and the usual cleanup and acceptance follow; if it finds
+   a blocking-free direction the LP is `Unbounded` and the ray is kept.
+
+## 8. Certificates
+
+**Primal infeasibility (Farkas).** When no entering candidate remains in row `r` (including the case where every
+candidate is a boxed variable that can be flipped and the infeasibility remains), the multipliers are
+`y = rho_r`. For every feasible `(x, r)`, `y^T (A x - r) = 0`, i.e. the combination
+`sum_j (A^T y)_j x_j - sum_i y_i r_i` is 0. `check_farkas(model, y, tol)` (`include/shodhan/rays.hpp`,
+`src/model/rays.cpp`) computes the largest and smallest value of that combination over the box of column and row
+bounds and accepts if the largest is below 0 or the smallest above 0 by more than `tol` times the magnitude of
+the terms; an infinite bound reached by a nonzero coefficient defeats the proof (coefficients below 1e-12 of the
+largest count as zero, because the basic variables of the row have coefficient 0 in theory and about 1e-17 in
+floating point). Why it works for the simplex row: with `sigma = +1` (the leaving variable violates its lower
+bound) the row `x_p + sum_j alpha_j x_j = 0` gives `x_p <= -sum_j min(alpha_j x_j)`, and the candidates are
+exactly the variables for which this minimum is not attained at the current bound; when there is none, or all can
+be flipped and the slope is still positive, even the best choice leaves `x_p` below its lower bound. The case
+`sigma = -1` is symmetric.
+
+**Unboundedness.** The primal simplex stops with a direction when the entering variable `q` (moving by
+`dir * t`) is not boxed and no basic variable blocks: the structural part of the ray is `ray_q = dir` and
+`ray_B = -dir * alpha` for the basic structurals. `check_unbounded_ray(model, ray, tol)` verifies that the column
+bounds and row ranges allow motion along it forever (finite column bound in the direction of motion must have a
+zero component; `A ray` must lie in the recession cone of the row ranges) and that the objective improves
+(`c^T ray < 0` for minimization, `> 0` for maximization). Feasibility of the LP is not part of this check; it comes
+from the primal feasible basis the primal simplex started from.
+
+## 9. Numerical trouble and acceptance
+
+- **Pivot disagreement** (row versus column value of the pivot): refactorize and repeat; if the factorization is
+  fresh the candidate is excluded for this iteration and a trouble event is counted.
+- **Drift:** after every refactorization `x_B` and `d` are recomputed from scratch and compared with the updated
+  values; a primal drift above 1e-6 counts as a trouble event.
+- **Rank deficiency of the basis:** `BasisFactor::repair` replaces the deficient columns by logicals; the replaced
+  variables become nonbasic at a bound, the pricing weights are reset to 1 (`weights_exact()` becomes false) and the
+  primal and dual values are recomputed.
+- More than `max_trouble` (default 6, target) consecutive trouble events end the solve with `NumericalError`.
+- **Acceptance** (`final_check`, default on): `x_B` and `y` are refined (up to two rounds of solving for the
+  residual of `A x - r = 0` and `B^T y = c_B`), then `check_kkt` is run on the model with the current bounds at
+  `final_tol` (default 1e-6). If it fails, the tolerances are tightened to 1e-9 once and the cleanup is redone; if
+  it still fails the result is `NumericalError`, never `Optimal`. An `Infeasible` result must pass `check_farkas`
+  (tolerance 1e-9) and an `Unbounded` one `check_unbounded_ray` (1e-8), otherwise it also becomes `NumericalError`.
