@@ -109,10 +109,12 @@ int main(int argc, char** argv) {
         if (adj->exact_status == 0) {
           const double rel = std::fabs(r.solution.objective - adj->exact_objective) / (1.0 + std::fabs(adj->exact_objective));
           if (r.status != Status::Optimal || !(rel <= adj->max_rel_error)) why = "differs from the exact answer";
+        } else if (adj->exact_status == 2) {
+          if (r.status == Status::Unbounded) why = "differs from the exact answer (infeasible)";
         } else if (r.status != Status::Unbounded && !(r.status == Status::NumericalError && !adj->pipeline_certifies)) {
           why = "differs from the exact answer (unbounded)";
         }
-        std::cout << "ADJUDICATED " << fam_arg << " seed " << seed << ": pipeline " << to_string(r.status) << ", exact " << (adj->exact_status == 0 ? "optimal" : "unbounded") << "\n";
+        std::cout << "ADJUDICATED " << fam_arg << " seed " << seed << ": pipeline " << to_string(r.status) << ", exact " << (adj->exact_status == 0 ? "optimal" : adj->exact_status == 1 ? "unbounded" : "infeasible") << "\n";
       } else if (r.status != ref.status) {
         why = std::string("status ") + to_string(r.status) + ", oracle " + to_string(ref.status) + " [" + r.message + "]";
       } else if (r.status == Status::Optimal) {

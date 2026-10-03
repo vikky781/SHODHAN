@@ -57,12 +57,13 @@ def main():
     print("KASAUTI corpus check: %d certificates" % len(manifest))
     for fam in sorted(per_family):
         c = per_family[fam]
-        print("  %-12s total %3d | optimal %3d infeasible %3d unbounded %3d | exact PASS %3d (rigorous %3d, tolerance-level %3d) | float PASS %3d | exact/float agree %3d"
+        print("  %-12s total %3d | optimal %3d infeasible %3d unbounded %3d | exact PASS %3d (rigorous %3d, tolerance-checked %3d) | float PASS %3d | exact/float agree %3d"
               % (fam, c["total"], c["optimal"], c["infeasible"], c["unbounded"], c["exact PASS"], c["rigorous"], c["tolerance-level"], c["float PASS"], c["agree"]))
     tot = sum(c["total"] for c in per_family.values())
-    print("  totals: %d certificates, exact PASS %d, float PASS %d, verdicts agree %d, rigorous %d" % (
+    print("  totals: %d certificates, exact PASS %d, float PASS %d, verdicts agree %d, rigorous %d, tolerance-checked %d" % (
         tot, sum(c["exact PASS"] for c in per_family.values()), sum(c["float PASS"] for c in per_family.values()),
-        sum(c["agree"] for c in per_family.values()), sum(c["rigorous"] for c in per_family.values())))
+        sum(c["agree"] for c in per_family.values()), sum(c["rigorous"] for c in per_family.values()),
+        sum(c["tolerance-level"] for c in per_family.values())))
     print("  attempts (configuration / count):")
     for k, v in sorted(attempts.items(), key=lambda kv: -kv[1]):
         print("    %4d  %s" % (v, k))

@@ -25,6 +25,9 @@ TEST_CASE(pipeline_agrees_with_exact_arithmetic_on_adjudicated_seeds) {
       const double rel = std::fabs(r.solution.objective - s.exact_objective) / (1.0 + std::fabs(s.exact_objective));
       CHECK(rel <= s.max_rel_error);
       CHECK(check_kkt(model, r.solution, 1e-6).ok);
+    } else if (s.exact_status == 2) {
+      // Exactly infeasible by a margin far below every tolerance: the pipeline must not claim Unbounded.
+      CHECK(r.status != Status::Unbounded);
     } else if (s.pipeline_certifies) {
       CHECK(r.status == Status::Unbounded);
       CHECK(check_unbounded_ray(model, r.unbounded_ray, 1e-7).ok);

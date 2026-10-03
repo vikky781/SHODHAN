@@ -188,7 +188,7 @@ def main(argv=None):
     label = rep.detail or ("PASS" if code == 0 else "FAIL")
     if code == 2:
         label = "INCONCLUSIVE"
-    print("VERDICT: " + label + ("" if code != 0 else ("  (rigorous: exact arithmetic)" if rep.rigorous else "  (not a rigorous proof: see the lines above)")))
+    print("VERDICT: " + label + ("" if code != 0 else ("  (rigorous: exact arithmetic)" if rep.rigorous else "  (tolerance-checked, not a proof: see the lines above)")))
     if args.report:
         rep.data["verdict"] = label
         rep.data["lines"] = rep.lines

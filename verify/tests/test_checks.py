@@ -119,6 +119,25 @@ class DualNoiseTests(unittest.TestCase):
     def test_noise_is_not_accepted_when_strict(self):
         self.assertEqual(verify(self.MODEL, self.cert(-1 + 1e-14), dual_zero_tol=0)[0], 1)
 
+    def claim_cert(self, y2, rigorous):
+        cert = self.cert(y2)
+        cert["dual_bound"] = {"rigorous": rigorous, "available": True}
+        return cert
+
+    def test_false_rigorous_claim_fails_in_exact_mode(self):
+        code, rep = verify(self.MODEL, self.claim_cert(-1 + 1e-14, True))
+        self.assertEqual(code, 1)
+        self.assertTrue(any("claim is false" in line for line in rep.lines))
+
+    def test_honest_non_rigorous_claim_passes(self):
+        code, rep = verify(self.MODEL, self.claim_cert(-1 + 1e-14, False))
+        self.assertEqual((code, rep.detail), (0, "PASS_OPTIMAL_TOL"))
+
+    def test_float_mode_cannot_judge_a_rigorous_claim(self):
+        code, rep = verify(self.MODEL, self.claim_cert(-1 + 1e-14, True), mode="float")
+        self.assertEqual(code, 0)
+        self.assertTrue(any("float mode cannot judge" in line for line in rep.lines))
+
     def test_large_wrong_sign_is_never_dropped(self):
         self.assertEqual(verify(self.MODEL, self.cert(-0.5))[0], 1)
 

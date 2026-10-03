@@ -254,18 +254,54 @@ def check_optimal(model, cert, ar, opt, rep):
                                                  "" if tolerant else " (valid for every feasible x by weak duality)"))
         rep.say("gap |primal objective - bound|: %s" % fmt(ar.absval(gap)))
         scale = 1 + ar.absval(obj_model)
-        gap_ok = gap <= opt.gap_tol * scale
-        if gap < -opt.gap_tol * scale:
-            rep.say("note: the primal point beats the dual bound by %s: it is infeasible by tolerance, not exactly feasible" % fmt(-gap))
-        rep.check("dual_gap", gap_ok, lower_bound=lb_model, primal_objective=obj_model, gap=gap, tolerance=opt.gap_tol,
+        # A point that beats the bound (negative gap) is consistent only if its own constraint violations,
+        # weighted by the multipliers, explain it: obj(x) >= LB(y) - sum |y_i| viol_i - sum |d_j| viol_j.
+        explained = ar.zero
+        for i in range(model.n_rows):
+            v = ar.zero
+            if model.row_lo[i] is not None and act[i] < ar.num(model.row_lo[i]):
+                v = ar.num(model.row_lo[i]) - act[i]
+            elif model.row_hi[i] is not None and act[i] > ar.num(model.row_hi[i]):
+                v = act[i] - ar.num(model.row_hi[i])
+            if v > 0:
+                explained += ar.absval(y[i]) * v
+        for j in range(model.n_cols):
+            v = ar.zero
+            if model.col_lo[j] is not None and x[j] < ar.num(model.col_lo[j]):
+                v = ar.num(model.col_lo[j]) - x[j]
+            elif model.col_hi[j] is not None and x[j] > ar.num(model.col_hi[j]):
+                v = x[j] - ar.num(model.col_hi[j])
+            if v > 0:
+                explained += ar.absval(d[j]) * v
+        gap_ok = gap <= opt.gap_tol * scale and gap >= -(explained + opt.gap_tol * scale)
+        if gap < 0:
+            rep.say("the primal point beats the dual bound by %s; its constraint violations weighted by the multipliers explain up to %s: %s" % (
+                fmt(-gap), fmt(explained), "consistent" if gap_ok else "NOT explained, the point and the multipliers are inconsistent"))
+        rep.check("dual_gap", gap_ok, lower_bound=lb_model, primal_objective=obj_model, gap=gap, explained_by_violation=explained, tolerance=opt.gap_tol,
                   strict=not tolerant, dropped=len(dropped))
-    ok = primal_ok and gap_ok and claim_ok
+    claim = cert.get("dual_bound")
+    consistent = True
+    if isinstance(claim, dict) and "rigorous" in claim:
+        strict_ok = lb is not None and not tolerant
+        if claim["rigorous"] is True and not strict_ok and not ar.exact:
+            rep.say("the certificate claims a rigorous dual bound; float mode cannot judge that claim (use exact mode)")
+        elif claim["rigorous"] is True and not strict_ok:
+            consistent = False
+            rep.say("the certificate claims a rigorous dual bound, but the strict bound does not exist in exact arithmetic: the claim is false")
+        else:
+            rep.say("the certificate's claim about its dual bound (rigorous: %s) is %s" % (
+                claim["rigorous"], "consistent with the exact strict bound" if claim["rigorous"] == strict_ok else "weaker than the exact strict result (a claim is not evidence)"))
+        rep.check("claimed_rigorous_consistent", consistent, claimed=claim["rigorous"], strict_bound_exists=strict_ok)
+    ok = primal_ok and gap_ok and claim_ok and consistent
     rep.data.update({"primal_objective": _jsonable(obj_model), "dual_bound": _jsonable(lb_model), "max_primal_violation": _jsonable(abs_v)})
     if ok:
         rep.detail = "PASS_OPTIMAL_TOL" if tolerant else "PASS_OPTIMAL"
         rep.rigorous = abs_v == 0 and ar.exact and not tolerant
-        rep.say("the optimum lies in [%s, %s]%s" % (fmt(min(obj_model, lb_model)), fmt(max(obj_model, lb_model)),
-                                                      "" if rep.rigorous else " (within the stated tolerances: the point is not exactly feasible or the mode is float)"))
+        if tolerant:
+            rep.say("tolerance-checked only: the primal point and the tolerance-level bound agree to %s; this is not a proof of optimality" % fmt(ar.absval(gap)))
+        else:
+            rep.say("the optimum lies in [%s, %s]%s" % (fmt(min(obj_model, lb_model)), fmt(max(obj_model, lb_model)),
+                                                          "" if rep.rigorous else " (within the stated tolerances: the point is not exactly feasible or the mode is float)"))
     else:
         rep.detail = "FAIL"
     return ok
