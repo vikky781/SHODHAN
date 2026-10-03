@@ -67,6 +67,7 @@ class Model:
         self.row_types = []          # 'L', 'G', 'E'
         self.row_lo = []             # None = -inf
         self.row_hi = []             # None = +inf
+        self.row_scale = []          # ranged rows: max(|rhs|, |range|) as a float, else 0
         self.col_names = []
         self.col_cost = []
         self.col_lo = []
@@ -123,6 +124,8 @@ def _fixed_fields(raw):
     """The six fixed-format fields of a data line, or None if the line does not follow the layout."""
     line = raw.rstrip("\r\n")
     if len(line) > 0 and line[0] != " ":
+        return None
+    if len(line.rstrip()) > 61:  # text beyond column 61 would be silently lost
         return None
     padded = line.ljust(61)
     gaps = (padded[3], padded[12:14], padded[22:24], padded[36:39], padded[47:49])
@@ -467,6 +470,7 @@ def parse_mps(data, exact=True):
     for i, typ in enumerate(model.row_types):
         b = rhs.get(i, zero)
         r = ranges.get(i)
+        model.row_scale.append(float(max(abs(b), abs(r))) if (r is not None and not is_infinite(b) and not is_infinite(r) and r != 0) else 0.0)
         lo = hi = None
         if is_infinite(b):
             if typ == "L" and b > 0 or typ == "G" and b < 0:

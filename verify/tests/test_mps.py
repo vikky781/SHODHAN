@@ -191,6 +191,15 @@ ENDATA
         self.assertEqual((m.col_cost, m.row_hi, m.col_hi), ([1, 0], [5, None], [3, None]))
         self.assertEqual(m.col_entries, [[(0, 2)], [(1, 4)]])
 
+    def test_a_number_that_does_not_fit_a_fixed_field_is_never_silently_truncated(self):
+        from tests.mpsgen import fixed_line
+        long_number = "3.14159265358979"  # 16 characters in a 12-character field
+        text = chr(10).join(["NAME X", "ROWS", " N  COST", " L  ROW 1", "COLUMNS",
+                             fixed_line("", "COL 1", "COST", "1.", "ROW 1", long_number), "RHS", fixed_line("", "RHS", "ROW 1", "5."),
+                             "ENDATA", ""])
+        with self.assertRaises(MpsError):
+            parse(text)
+
     def test_free_format_names_are_case_sensitive_and_sections_are_not(self):
         text = FREE.replace("ROWS", "rows").replace("COLUMNS", "Columns").replace("ENDATA", "endata")
         m = parse(text)

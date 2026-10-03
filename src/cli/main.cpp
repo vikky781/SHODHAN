@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "factor_bench.hpp"
+#include "dump_model.hpp"
 #include "info.hpp"
 #include "presolve_report.hpp"
 #include "solve_command.hpp"
@@ -37,6 +38,8 @@ void print_usage(std::ostream& out) {
       << "                             solve an LP (presolve, scaling, dual simplex, KKT check on\n"
       << "                             the original model); models with integer columns are\n"
       << "                             reported as not implemented\n"
+      << "  shodhan dump-model <file>  print a canonical text form of the parsed model (used to\n"
+      << "                             compare readers)\n"
       << "  shodhan --help             show this help\n"
       << "  shodhan --version          show the version\n"
       << "\n"
@@ -142,6 +145,13 @@ int run(const std::vector<std::string>& args) {
   }
   if (cmd == "--version" || cmd == "-V") {
     std::cout << "shodhan " << shodhan::kVersion << "\n";
+    return kExitOk;
+  }
+  if (cmd == "dump-model") {
+    if (args.size() != 2) return usage_error("'dump-model' takes exactly one file argument");
+    shodhan::MpsReadResult read;
+    if (!load(args[1], &read)) return kExitUsage;
+    shodhan::cli::print_model_dump(read.model, std::cout);
     return kExitOk;
   }
   if (cmd == "info") return run_info(args);
