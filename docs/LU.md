@@ -119,9 +119,12 @@ slot at the end of the order and its old slot is marked dead; slot arrays are si
 (ascending) with the unpivoted rows (ascending), replaces the basis variable at each deficient
 position by the logical variable `n + row`, refactorizes, and returns the
 `(position, old_var, new_var)` triples. The new columns are unit vectors of exactly the rows the
-elimination could not pivot on, so the repaired basis is nonsingular whenever the deficient set
-was right; `status()` reports the result of the refactorization. The procedure has no random or
-address-dependent step: identical inputs give identical substitutions.
+elimination could not pivot on, so for an exactly singular basis the repaired basis is nonsingular
+after this one round. For a *numerically* singular basis the refactorization may choose other pivots
+and find new deficiencies; the round is then repeated, at most 8 times, and the triples returned are
+the net substitutions relative to the basis passed in (ascending by position). `status()` reports the
+result of the last refactorization (`RankDeficient` only if the rounds ran out). The procedure has no
+random or address-dependent step: identical inputs give identical substitutions.
 
 ## 4. Solves
 
@@ -209,6 +212,11 @@ stays valid until it is consumed by a successful update, replaced by another `ft
   not well defined: the tests only require the factorization's rank to lie between the dense
   oracle's rank at relative tolerances 1e-8 and 1e-14 (on the equilibrated matrix). An accepted
   pivot is not a certificate of good conditioning.
+- **Rank detection is noise-limited, not rank revealing.** In a stress run over 15000 seeded bases of
+  random LPs and structured families, `rel_pivot_tol` 1e-11 missed one of two dependent columns in 2 bases whose
+  coefficients span about eight decades (unscaled data); 1e-9 instead flagged one healthy column in 1 basis, and 1e-8
+  in 8. No single value removes both kinds of error, which is why the default stays at 1e-11 and the model should
+  be scaled first.
 - **Accepted but badly conditioned bases.** A basis can pass all pivot tests and still have a huge
   condition number (a triangular-like basis with large off-diagonals, for example: the crash basis of a randomly
   generated LP with coefficients over three decades gave FTRAN results with entries around 1e29 while the relative

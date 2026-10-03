@@ -124,9 +124,13 @@ class BasisFactor {
   /// After factorize() returned RankDeficient: replaces the deficient basis
   /// columns, in ascending position, by the logical columns of the rows left
   /// without a pivot, in ascending row, then refactorizes. basis_vars is
-  /// updated in place. Returns the substitutions made (empty when the last
-  /// factorization was not rank deficient); status() is the status of the
-  /// refactorization. Deterministic.
+  /// updated in place. If the refactorization finds new deficiencies (possible
+  /// only for numerically singular bases) the step is repeated, at most 8
+  /// rounds in total. Returns the net substitutions relative to the basis that
+  /// was passed in, ascending by position (empty when the last factorization
+  /// was not rank deficient); status() is the status of the last
+  /// refactorization and is RankDeficient only if the rounds ran out.
+  /// Deterministic.
   std::vector<BasisSubstitution> repair(const SparseMatrix& A, std::vector<Index>& basis_vars);
 
   /// Solves B x = a in place: on entry rhs holds a (indexed by row), on exit x

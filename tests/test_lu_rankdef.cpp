@@ -207,3 +207,22 @@ TEST_CASE(lu_rankdef_random_structured_matrices) {
   }
   CHECK(deficient_seen > 20);
 }
+
+TEST_CASE(lu_rankdef_repair_repeats_for_numerically_singular_bases) {
+  // The basis of this seeded LP (coefficients over eight decades) is numerically
+  // singular; after one round of substitutions the refactorization finds further
+  // deficiencies, so repair() must go on until the basis factorizes.
+  const TestBasis tb = make_family_basis(8, 160, 3935);
+  BasisFactor f;
+  REQUIRE(f.factorize(tb.A, tb.basis) == FactorStatus::RankDeficient);
+  std::vector<Index> basis = tb.basis;
+  const std::vector<BasisSubstitution> ch = f.repair(tb.A, basis);
+  CHECK(f.status() == FactorStatus::Ok);
+  CHECK(f.valid());
+  CHECK(!ch.empty());
+  for (std::size_t k = 0; k < ch.size(); ++k) {
+    CHECK_EQ(basis[to_size(ch[k].position)], ch[k].new_var);
+    CHECK_EQ(tb.basis[to_size(ch[k].position)], ch[k].old_var);
+    CHECK(k == 0 || ch[k - 1].position < ch[k].position);
+  }
+}
