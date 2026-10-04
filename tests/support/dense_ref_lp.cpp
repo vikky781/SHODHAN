@@ -116,7 +116,7 @@ SimplexOutcome simplex(Tableau& tb, const std::vector<Real>& cost, const std::ve
     if (++*iterations > kMaxIterations) return SimplexOutcome::IterationLimit;
     if (*iterations % set.refactor_every == 0) refactor(tb, orig);
     // Reduced costs from scratch: red_j = c_j - sum_k c_B[k] T[k][j].
-    std::fill(is_basic.begin(), is_basic.end(), 0);
+    std::fill(is_basic.begin(), is_basic.end(), static_cast<char>(0));
     for (std::size_t k = 0; k < m; ++k) is_basic[static_cast<std::size_t>(tb.basis[k])] = 1;
     for (std::size_t j = 0; j < n; ++j) red[j] = cost[j];
     for (std::size_t k = 0; k < m; ++k) {

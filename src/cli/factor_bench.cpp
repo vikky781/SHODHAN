@@ -323,7 +323,7 @@ int run_factor_bench(const std::vector<std::string>& args) {
         // A numerically singular basis: substitute logicals as the crash did.
         repairs_in_run += static_cast<int>(f.repair(A, basis).size());
         fs = f.status();
-        std::fill(in_basis.begin(), in_basis.end(), 0);
+        std::fill(in_basis.begin(), in_basis.end(), static_cast<char>(0));
         for (const Index v : basis) in_basis[to_size(v)] = 1;
       }
       ok = fs == FactorStatus::Ok;
