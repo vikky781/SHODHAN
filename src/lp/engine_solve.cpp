@@ -69,8 +69,20 @@ EngineStatus SimplexEngine::finish_after_dual() {
       opt_.primal_tol = std::min(saved_p, opt_.polish_tol);
       opt_.dual_tol = std::min(saved_d, opt_.polish_tol);
       opt_.iteration_limit = std::min(saved_limit, stats_.iterations + 100 + 2 * static_cast<long long>(m_));
-      const InfeasibilitySummary tight = infeasibility();
-      if (tight.primal_count > 0 || tight.dual_count > 0) {
+      // A bounded alternation: the dual simplex shifts the costs of wrong-signed reduced costs to zero while it
+      // removes primal violations, so the true costs are restored before each check, and a dual violation that
+      // reappears is removed by the primal simplex. One pass is not enough: a leftover dual infeasibility far
+      // above the polish tolerance (wide seed 433: 2e-7) would otherwise survive and be accepted later at the
+      // normal tolerance.
+      for (int pass = 0; pass < 4; ++pass) {
+        if (costs_modified_) {
+          cost_ = cost_orig_;
+          costs_modified_ = false;
+          compute_primal();
+          compute_dual();
+        }
+        const InfeasibilitySummary tight = infeasibility();
+        if (tight.primal_count == 0 && tight.dual_count == 0) break;
         if (tight.primal_count == 0) {
           run_primal_simplex();
         } else {
