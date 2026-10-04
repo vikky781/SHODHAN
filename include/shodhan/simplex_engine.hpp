@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iosfwd>
+#include <memory>
 #include <vector>
 
 #include "shodhan/basis_factor.hpp"
@@ -147,6 +148,14 @@ struct EngineState {
   Index last_leaving = -1;
 };
 
+/// A row to append to the model the engine works on: sum val[k] x[idx[k]] in [lo, hi].
+struct RowSpec {
+  std::vector<Index> idx;
+  std::vector<double> val;
+  double lo = -kInf;
+  double hi = kInf;
+};
+
 /// Bounded dual simplex (with a primal simplex for cleanup) on the computational
 /// form  A x - r = 0, variables 0..n-1 structural and n..n+m-1 logical (column
 /// -e_i). The model is minimized internally (a Maximize model has its costs
@@ -169,6 +178,19 @@ class SimplexEngine {
   void restore_state(const EngineState& state);
   /// False after restore_state() until the next refactorization.
   bool factor_valid() const { return factor_valid_; }
+
+  // ---- rows (cutting planes) ---------------------------------------------
+  /// Appends rows to the model the engine works on (it then keeps its own copy of the model; the model passed
+  /// to the constructor is not touched). The logical variable of each new row enters the basis, so the basis
+  /// stays dual feasible and the next solve() is a warm dual simplex start. Must not be called while a probe
+  /// (EngineProbe, a saved EngineState) is outstanding: saved states have the old dimensions.
+  void add_rows(const std::vector<RowSpec>& rows);
+  /// Removes rows whose logical variable is basic (a slack row, so the basis stays valid). Returns false and
+  /// changes nothing if any listed row is tight (nonbasic logical) or out of range. Row indices above a removed
+  /// row shift down; `rows` need not be sorted.
+  bool remove_rows(const std::vector<Index>& rows);
+  /// The model including appended rows.
+  const LpModel& current_model() const { return *mp_; }
 
   // ---- warm start ------------------------------------------------------
   /// Solves like solve() but stops with IterationLimit after at most `max_iterations` further iterations.
@@ -292,7 +314,9 @@ class SimplexEngine {
   const LpModel& checked_model();
 
   SimplexOptions opt_;
-  const LpModel& model_;
+  const LpModel* mp_ = nullptr;
+  std::shared_ptr<LpModel> owned_;  ///< set once rows were added; shared by copies of the engine
+  const LpModel& mdl() const { return *mp_; }
   Index n_ = 0, m_ = 0, N_ = 0;
   double sgn_ = 1.0;
   CsrMatrix csr_;

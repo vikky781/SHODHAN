@@ -94,7 +94,7 @@ EngineStatus SimplexEngine::run_primal_simplex() {
     refreshed_for_optimality = false;
 
     // ---- entering column and ratio test ----
-    load_col(model_.A, n_, q, col_);
+    load_col(mdl().A, n_, q, col_);
     factor_.ftran(col_, true);
     double amax = 0.0;
     for (const Index i : col_.indices()) amax = std::max(amax, std::fabs(col_[i]));

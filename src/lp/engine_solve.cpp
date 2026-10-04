@@ -225,8 +225,8 @@ void SimplexEngine::refine_solution(int rounds) {
       if (x == 0.0) continue;
       xmax = std::max(xmax, std::fabs(x));
       if (j < n_) {
-        for (Index t = model_.A.col_start[to_size(j)]; t < model_.A.col_start[to_size(j) + 1]; ++t) {
-          rhs_.add(model_.A.row_index[to_size(t)], model_.A.value[to_size(t)] * x);
+        for (Index t = mdl().A.col_start[to_size(j)]; t < mdl().A.col_start[to_size(j) + 1]; ++t) {
+          rhs_.add(mdl().A.row_index[to_size(t)], mdl().A.value[to_size(t)] * x);
         }
       } else {
         rhs_.add(j - n_, -x);
@@ -246,8 +246,8 @@ void SimplexEngine::refine_solution(int rounds) {
       double bt;
       if (v < n_) {
         bt = 0.0;
-        for (Index t = model_.A.col_start[to_size(v)]; t < model_.A.col_start[to_size(v) + 1]; ++t) {
-          bt += model_.A.value[to_size(t)] * y_[to_size(model_.A.row_index[to_size(t)])];
+        for (Index t = mdl().A.col_start[to_size(v)]; t < mdl().A.col_start[to_size(v) + 1]; ++t) {
+          bt += mdl().A.value[to_size(t)] * y_[to_size(mdl().A.row_index[to_size(t)])];
         }
       } else {
         bt = -y_[to_size(v - n_)];
@@ -267,8 +267,8 @@ void SimplexEngine::refine_solution(int rounds) {
 }
 
 const LpModel& SimplexEngine::checked_model() {
-  if (!bounds_modified_) return model_;
-  check_model_ = model_;
+  if (!bounds_modified_) return mdl();
+  check_model_ = mdl();
   for (Index j = 0; j < n_; ++j) {
     check_model_.col_lower[to_size(j)] = lo_[to_size(j)];
     check_model_.col_upper[to_size(j)] = hi_[to_size(j)];

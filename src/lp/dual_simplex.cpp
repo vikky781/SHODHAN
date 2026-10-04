@@ -351,7 +351,7 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     // Entering column (spike saved for the update) and the pivot check.
     {
       ProfTimer pt(opt_.profile, stats_.profile.ftran_column);
-      load_column(model_.A, n_, q, col_);
+      load_column(mdl().A, n_, q, col_);
       factor_.ftran(col_, true);
     }
     const double alpha_c = col_[r];
@@ -481,8 +481,8 @@ void SimplexEngine::apply_bound_flips(const std::vector<Index>& flips, double* d
     }
     flip_objective_ += cost_[to_size(j)] * change;
     if (j < n_) {
-      for (Index t = model_.A.col_start[to_size(j)]; t < model_.A.col_start[to_size(j) + 1]; ++t) {
-        rhs_.add(model_.A.row_index[to_size(t)], model_.A.value[to_size(t)] * change);
+      for (Index t = mdl().A.col_start[to_size(j)]; t < mdl().A.col_start[to_size(j) + 1]; ++t) {
+        rhs_.add(mdl().A.row_index[to_size(t)], mdl().A.value[to_size(t)] * change);
       }
     } else {
       rhs_.add(j - n_, -change);

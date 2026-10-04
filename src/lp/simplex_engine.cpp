@@ -21,7 +21,7 @@ const char* to_string(EngineStatus status) noexcept {
 }
 
 SimplexEngine::SimplexEngine(const LpModel& model, const SimplexOptions& options)
-    : opt_(options), model_(model), n_(model.n_cols), m_(model.n_rows), N_(model.n_cols + model.n_rows) {
+    : opt_(options), mp_(&model), n_(model.n_cols), m_(model.n_rows), N_(model.n_cols + model.n_rows) {
   sgn_ = model.sense == Sense::Maximize ? -1.0 : 1.0;
   csr_ = model.A.to_csr();
   build_state();
@@ -34,13 +34,13 @@ void SimplexEngine::build_state() {
   hi_.assign(sn, 0.0);
   cost_orig_.assign(sn, 0.0);
   for (Index j = 0; j < n_; ++j) {
-    lo_[to_size(j)] = model_.col_lower[to_size(j)];
-    hi_[to_size(j)] = model_.col_upper[to_size(j)];
-    cost_orig_[to_size(j)] = sgn_ * model_.col_cost[to_size(j)];
+    lo_[to_size(j)] = mdl().col_lower[to_size(j)];
+    hi_[to_size(j)] = mdl().col_upper[to_size(j)];
+    cost_orig_[to_size(j)] = sgn_ * mdl().col_cost[to_size(j)];
   }
   for (Index i = 0; i < m_; ++i) {
-    lo_[to_size(n_ + i)] = model_.row_lower[to_size(i)];
-    hi_[to_size(n_ + i)] = model_.row_upper[to_size(i)];
+    lo_[to_size(n_ + i)] = mdl().row_lower[to_size(i)];
+    hi_[to_size(n_ + i)] = mdl().row_upper[to_size(i)];
   }
   cost_ = cost_orig_;
   costs_modified_ = false;
@@ -242,11 +242,11 @@ bool SimplexEngine::set_basis(const BasisSnapshot& snapshot) {
 }
 
 bool SimplexEngine::refactor(bool reset_weights) {
-  FactorStatus st = factor_.factorize(model_.A, basis_);
+  FactorStatus st = factor_.factorize(mdl().A, basis_);
   bool repaired = false;
   if (st == FactorStatus::RankDeficient) {
     const std::vector<Index> before = basis_;
-    const std::vector<BasisSubstitution> changes = factor_.repair(model_.A, basis_);
+    const std::vector<BasisSubstitution> changes = factor_.repair(mdl().A, basis_);
     for (const BasisSubstitution& c : changes) {
       const Index old_var = c.old_var;
       const Index new_var = c.new_var;
@@ -280,8 +280,8 @@ void SimplexEngine::compute_primal() {
     const double v = x_[to_size(j)];
     if (v == 0.0) continue;
     if (j < n_) {
-      for (Index t = model_.A.col_start[to_size(j)]; t < model_.A.col_start[to_size(j) + 1]; ++t) {
-        rhs_.add(model_.A.row_index[to_size(t)], -model_.A.value[to_size(t)] * v);
+      for (Index t = mdl().A.col_start[to_size(j)]; t < mdl().A.col_start[to_size(j) + 1]; ++t) {
+        rhs_.add(mdl().A.row_index[to_size(t)], -mdl().A.value[to_size(t)] * v);
       }
     } else {
       rhs_.add(j - n_, v);
@@ -311,8 +311,8 @@ void SimplexEngine::update_duals_from_y() {
       continue;
     }
     double s = cost_[to_size(j)];
-    for (Index t = model_.A.col_start[to_size(j)]; t < model_.A.col_start[to_size(j) + 1]; ++t) {
-      s -= model_.A.value[to_size(t)] * y_[to_size(model_.A.row_index[to_size(t)])];
+    for (Index t = mdl().A.col_start[to_size(j)]; t < mdl().A.col_start[to_size(j) + 1]; ++t) {
+      s -= mdl().A.value[to_size(t)] * y_[to_size(mdl().A.row_index[to_size(t)])];
     }
     d_[to_size(j)] = s;
   }
@@ -398,13 +398,13 @@ InfeasibilitySummary SimplexEngine::infeasibility() const {
 double SimplexEngine::objective() const {
   double s = 0.0;
   for (Index j = 0; j < N_; ++j) s += cost_orig_[to_size(j)] * x_[to_size(j)];
-  return s + sgn_ * model_.objective_offset;
+  return s + sgn_ * mdl().objective_offset;
 }
 
 double SimplexEngine::working_objective() const {
   double s = 0.0;
   for (Index j = 0; j < N_; ++j) s += cost_[to_size(j)] * x_[to_size(j)];
-  return s + sgn_ * model_.objective_offset;
+  return s + sgn_ * mdl().objective_offset;
 }
 
 Solution SimplexEngine::solution() const {
