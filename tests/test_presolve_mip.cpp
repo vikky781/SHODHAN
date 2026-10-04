@@ -380,3 +380,33 @@ TEST_CASE(presolve_mip_equivalence_with_brute_force_on_the_original_model) {
   CHECK(ty.feasible > 200);
   CHECK(ty.infeasible > 20);
 }
+
+TEST_CASE(presolve_mip_parallel_rows_keep_the_tighter_bound_of_each_side) {
+  // r0: x + y <= 5;  r1: 2x + 2y in [4, 8] (= x + y in [2, 4]);  r2: -x - y >= -3 (= x + y <= 3).
+  Builder b;
+  const int x = b.col(ColType::Integer, 0.0, 10.0, 1.0);
+  const int y = b.col(ColType::Integer, 0.0, 10.0, 2.0);
+  b.row({{x, 1.0}, {y, 1.0}}, -kInf, 5.0);
+  b.row({{x, 2.0}, {y, 2.0}}, 4.0, 8.0);
+  b.row({{x, -1.0}, {y, -1.0}}, -3.0, kInf);
+  const LpModel m = b.finish();
+  PresolveOptions o;
+  o.is_mip = true;
+  o.need_duals = false;
+  o.empty_rows = o.empty_columns = o.fixed_columns = o.singleton_rows = o.redundant_rows = false;
+  o.forcing_rows = o.doubleton_equations = o.dual_fixing = o.integer_bounds = false;
+  o.mip_propagation = o.coefficient_tightening = o.probing = o.duplicate_columns = o.clique_table = false;
+  o.parallel_rows = true;
+  const PresolveResult pr = presolve(m, o);
+  CHECK(pr.status == PresolveStatus::Reduced);
+  CHECK_EQ(pr.stats.parallel_rows, 2);
+  REQUIRE(pr.reduced.n_rows == 1);
+  // Which of the three rows survives is an implementation detail; its range must be the intersection [2, 3]
+  // expressed in the scale of the surviving row.
+  const double scale = std::fabs(pr.reduced.A.value[0]);
+  const bool negated = pr.reduced.A.value[0] < 0.0;
+  const double lo = negated ? -pr.reduced.row_upper[0] : pr.reduced.row_lower[0];
+  const double up = negated ? -pr.reduced.row_lower[0] : pr.reduced.row_upper[0];
+  CHECK_NEAR(lo / scale, 2.0, 1e-12);
+  CHECK_NEAR(up / scale, 3.0, 1e-12);
+}

@@ -149,9 +149,16 @@ Atamturk, Nemhauser, Savelsbergh (2000), *Conflict graphs in solving integer pro
   to 1 and propagated on a trail that is undone afterwards. One branch infeasible: the column is fixed to the other
   value. Both feasible: integer bounds common to both branches are tightened; remaining one-sided results are
   stored as implications `x_j = v => x_k <= u` (or `>= l`), up to `max_implications`.
-- **Parallel rows** (`parallel_rows`). Rows with the same column set and coefficients proportional within a
-  relative `1e-13` are merged: the intersection of the (rescaled) ranges is kept, the other row is removed. An empty
-  intersection is left to the infeasibility checks of the standard passes.
+- **Parallel rows** (`parallel_rows`). Rows with the same column set whose coefficients are proportional are merged.
+  With `lambda = a_k[first] / a_i[first]`, proportional means `|a_k[j] - lambda a_i[j]| <= 1e-13 |a_k[j]|` for every
+  entry. This is NOT exact proportionality: it admits rows that differ in the last two or three bits (typical after
+  independent scaling), and the merged row is then off by at most about `1e-13` relative to the activity, three to
+  four orders of magnitude below `feasibility_tol` (1e-9). The value is a design choice, not tuned on a failing
+  case; a smaller one would only miss rows that were scaled in floating point. The ranges are rescaled to row `i`
+  (a negative `lambda` swaps the two sides) and intersected: the larger lower bound and the smaller upper bound are
+  kept, so the surviving row is the tighter of the two on each side (unit test
+  `presolve_mip_parallel_rows_keep_the_tighter_bound_of_each_side`). An empty intersection is not merged and is left
+  to the infeasibility checks of the standard passes.
 - **Duplicate columns** (`duplicate_columns`). Identical columns with the same type and cost, finite lower bounds
   and (for integers) integral bounds are merged into `z = x_j + x_k` with bounds `[l_j + l_k, u_j + u_k]`.
   Postsolve (`DuplicateColumnRecord`): `x_j = max(l_j, z - u_k)` clamped to `u_j`, `x_k = z - x_j`.
