@@ -62,7 +62,7 @@ jobs:
             echo "--- compiler errors (first 40) ---"
             grep -E "error|Error|FAILED|warning C|warning:|see reference to|see declaration" build.log 2>/dev/null | grep -v "Node.js" | head -60
             echo "--- failing tests ---"
-            grep -F -e '***Failed' -e '[FAIL]' -e 'CHECK FAILED' -e 'FAILING' -e 'NONDETERMINISTIC' -e 'PROBLEM' -e 'Traceback' -e 'AssertionError' -e 'tests run' test.log 2>/dev/null | head -60
+            grep -F -e '***Failed' -e '[FAIL]' -e 'CHECK FAILED' -e 'FAILING' -e 'NONDETERMINISTIC' -e 'PROBLEM' -e 'Traceback' -e 'AssertionError' -e 'tests run' -e '  seed ' -e 'SEED' test.log 2>/dev/null | head -60
             echo "--- tail of the test log ---"
             tail -n 25 test.log 2>/dev/null
           } > failure.txt
