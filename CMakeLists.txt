@@ -20,6 +20,8 @@ option(SHODHAN_SANITIZE "Enable AddressSanitizer and UBSan (GCC/Clang only)" OFF
 function(shodhan_configure_target target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /permissive-)
+    # getenv and similar are used by the tests; MSVC calls them unsafe (C4996, an error under /WX).
+    target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     if(SHODHAN_WERROR)
       target_compile_options(${target} PRIVATE /WX)
     endif()

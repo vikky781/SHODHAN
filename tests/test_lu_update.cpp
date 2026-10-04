@@ -181,6 +181,7 @@ TEST_CASE(lu_update_sequences_match_fresh_factorization) {
             << " (seed " << worst_seed << ", step " << worst_step << ")\n"
             << std::defaultfloat;
   CHECK_EQ(passed_sequences, kSequences);
+  CHECK_EQ(failed_sequences, 0);
 }
 
 namespace {

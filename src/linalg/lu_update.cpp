@@ -93,7 +93,7 @@ FactorStatus BasisFactor::update(Index leaving_position) {
   }
 
   // Commit. Remove the old column p (and its mirror entries in the row lists).
-  std::size_t removed = u_cols_.size(p);
+  std::size_t removed = to_size(u_cols_.size(p));
   for (Index t = 0; t < u_cols_.size(p); ++t) {
     const Index row = u_cols_.index_at(p, t);
     u_rows_.erase(row, u_rows_.find(row, p));

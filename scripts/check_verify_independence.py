@@ -21,7 +21,7 @@ OWN_PACKAGES = {"kasauti", "tests"}
 # Used only when sys.stdlib_module_names (Python 3.10+) is not available.
 FALLBACK_STDLIB = {
     "__future__", "argparse", "ast", "base64", "binascii", "bisect", "collections", "contextlib", "copy", "csv",
-    "datetime", "decimal", "difflib", "enum", "errno", "fractions", "functools", "gzip", "hashlib", "heapq", "io",
+    "datetime", "decimal", "difflib", "enum", "errno", "fnmatch", "fractions", "functools", "glob", "gzip", "hashlib", "heapq", "io",
     "itertools", "json", "math", "operator", "os", "pathlib", "random", "re", "shutil", "string", "struct", "subprocess",
     "sys", "tempfile", "textwrap", "time", "traceback", "typing", "unittest", "warnings", "zlib",
 }
