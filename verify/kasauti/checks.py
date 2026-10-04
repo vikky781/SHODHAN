@@ -438,7 +438,10 @@ def check_unbounded(model, cert, ar, opt, rep):
             if viol / rmax > worst:
                 worst, worst_where = viol / rmax, "column %s" % model.col_names[j]
     ar_terms = [[] for _ in range(model.n_rows)]
+    row_abs = [ar.zero] * model.n_rows  # ||a_i||_1 over ALL entries of the row
     for j, col in enumerate(model.col_entries):
+        for i, a in col:
+            row_abs[i] += ar.absval(ar.num(a))
         if r[j] != 0:
             for i, a in col:
                 ar_terms[i].append(ar.num(a) * r[j])
@@ -451,7 +454,10 @@ def check_unbounded(model, cert, ar, opt, rep):
             viol = act
         if viol > 0:
             exact_ok = False
-            scale = ar.total([ar.absval(t) for t in ar_terms[i]])
+            # Normwise, like the columns: the violation relative to the largest value the row activity could take
+            # under this ray, ||a_i||_1 * ||r||_inf. (The magnitude of the nonzero terms alone is ill-defined: a
+            # row with a single nonzero term could never tolerate any rounding.)
+            scale = row_abs[i] * rmax
             if viol > opt.ray_tol * scale:
                 tol_ok = False
             if scale > 0 and viol / scale > worst:
