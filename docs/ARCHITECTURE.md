@@ -14,11 +14,14 @@ src/scaling/       row/column/objective scaling and unscaling
 src/presolve/      presolve reductions and postsolve
 src/io/            MPS reader and writer
 src/linalg/        sparse LU of simplex bases, FTRAN/BTRAN, Forrest-Tomlin update
-src/lp/            simplex engine (dual, primal cleanup) and the LP pipeline
-bench/             LP set runner (Python, standard library only)
+src/lp/            simplex engine (dual, primal cleanup, basis snapshots) and the LP pipeline
+src/cert/          SHA-256, JSON writer and the certificate writers (LP and MILP)
+src/mip/           branch and bound: node tree, plugins (selection, branching, heuristics), incumbent manager
+verify/            KASAUTI, the independent certificate verifier (Python, standard library only)
+bench/             set runner for LPs and MILPs and a MILP instance generator (Python, standard library only)
 src/cli/           the `shodhan` command-line tool
 tests/             unit tests, a header-only test harness, toy models
-tests/support/     TEST-ONLY code: dense reference LP solver, dense LU oracle, random LP and basis generators
+tests/support/     TEST-ONLY code: dense reference LP solver, brute-force and dense MIP oracles, dense LU oracle, random LP, MIP and basis generators
 scripts/           helper scripts (dependency guard)
 docs/              architecture, conventions, presolve, MPS conventions
 data/              notes on where to download benchmarks (nothing committed)
