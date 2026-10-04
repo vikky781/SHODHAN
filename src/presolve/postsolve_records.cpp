@@ -1,6 +1,7 @@
 #include "postsolve_records.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace shodhan::presolve_detail {
 
@@ -95,6 +96,16 @@ void DoubletonRecord::undo(PostsolveState& s) const {
   s.y[u(d.row)] = yi;
   s.d[u(d.elim)] = ej - d.a_elim * yi;
   s.d[u(d.kept)] = ek - d.a_kept * yi;
+}
+
+void DuplicateColumnRecord::undo(PostsolveState& s) const {
+  double z = s.x[u(keep_)];
+  if (integer_) z = std::round(z);
+  double xk = lo_keep_;
+  if (!is_inf(up_gone_)) xk = std::max(xk, z - up_gone_);
+  if (!is_inf(up_keep_)) xk = std::min(xk, up_keep_);
+  s.x[u(keep_)] = xk;
+  s.x[u(gone_)] = z - xk;
 }
 
 }  // namespace shodhan::presolve_detail

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "mip_reductions.hpp"
 #include "reductions.hpp"
 
 namespace shodhan {
@@ -49,6 +50,15 @@ std::vector<std::pair<std::string, int>> PresolveStats::reduction_counts() const
       {"integer bounds tightened", integer_bounds_tightened},
       {"implied-bound checks", implied_bound_checks},
       {"improving columns dropped", unbounded_columns},
+      {"bounds propagated", propagated_bounds},
+      {"coefficients tightened", coefficients_tightened},
+      {"probing fixings", probing_fixings},
+      {"probing bounds", probing_bounds},
+      {"implications", implications},
+      {"cliques", cliques},
+      {"parallel rows merged", parallel_rows},
+      {"duplicate columns merged", duplicate_columns},
+      {"dominated columns fixed", dominated_columns},
   };
 }
 
@@ -176,25 +186,43 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
     return std::move(res);
   };
 
-  for (int pass = 0; pass < options.max_passes && w.any_dirty(); ++pass) {
-    ++stats.passes;
-    w.compact();
-    for (int j = 0; j < w.n && !ctx.infeasible; ++j) {
-      if (!w.col_alive[u(j)] || !w.col_dirty[u(j)]) continue;
-      w.col_dirty[u(j)] = 0;
-      process_col(ctx, j);
+  // The standard passes, to a fixpoint (or max_passes). False when infeasibility was found.
+  auto run_standard = [&]() {
+    for (int pass = 0; pass < options.max_passes && w.any_dirty(); ++pass) {
+      ++stats.passes;
+      w.compact();
+      for (int j = 0; j < w.n && !ctx.infeasible; ++j) {
+        if (!w.col_alive[u(j)] || !w.col_dirty[u(j)]) continue;
+        w.col_dirty[u(j)] = 0;
+        process_col(ctx, j);
+      }
+      for (int i = 0; i < w.m && !ctx.infeasible; ++i) {
+        if (!w.row_alive[u(i)] || !w.row_dirty[u(i)]) continue;
+        w.row_dirty[u(i)] = 0;
+        process_row(ctx, i);
+      }
+      if (ctx.infeasible) return false;
     }
-    for (int i = 0; i < w.m && !ctx.infeasible; ++i) {
-      if (!w.row_alive[u(i)] || !w.row_dirty[u(i)]) continue;
-      w.row_dirty[u(i)] = 0;
-      process_row(ctx, i);
-    }
-    if (ctx.infeasible) {
-      st.records.clear();
-      res.note = ctx.reason;
-      return finish(PresolveStatus::Infeasible);
+    return true;
+  };
+  auto infeasible_result = [&]() {
+    st.records.clear();
+    res.note = ctx.reason;
+    return finish(PresolveStatus::Infeasible);
+  };
+
+  if (!run_standard()) return infeasible_result();
+  presolve_detail::MipWork mip_work;
+  if (options.is_mip && !ctx.unbounded) {
+    for (int round = 0; round < options.mip_rounds; ++round) {
+      const bool changed = presolve_detail::run_mip_round(ctx, mip_work);
+      if (ctx.infeasible) return infeasible_result();
+      if (!changed) break;
+      if (!run_standard()) return infeasible_result();
     }
   }
+  MipPresolveInfo structure;
+  if (options.is_mip && !ctx.unbounded) structure = presolve_detail::collect_mip_structure(ctx, mip_work);
 
   const bool all_gone = w.alive_rows() == 0 && w.alive_cols() == 0;
   if (ctx.unbounded) {
@@ -202,6 +230,27 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
     return finish(all_gone ? PresolveStatus::Unbounded : PresolveStatus::InfeasibleOrUnbounded);
   }
   build_reduced(model, w, &res);
+  if (options.is_mip) {
+    std::vector<int> col_new(u(w.n), -1);
+    for (std::size_t k = 0; k < st.col_map.size(); ++k) col_new[u(st.col_map[k])] = static_cast<int>(k);
+    for (Implication im : structure.implications) {
+      if (col_new[u(im.var)] < 0 || col_new[u(im.other)] < 0) continue;
+      im.var = col_new[u(im.var)];
+      im.other = col_new[u(im.other)];
+      res.mip.implications.push_back(im);
+    }
+    for (const auto& clique : structure.cliques.cliques) {
+      std::vector<int> lits;
+      for (const int l : clique) {
+        const int cn = col_new[u(l >> 1)];
+        if (cn < 0) break;
+        lits.push_back(2 * cn + (l & 1));
+      }
+      if (lits.size() == clique.size()) res.mip.cliques.cliques.push_back(std::move(lits));
+    }
+    stats.implications = static_cast<int>(res.mip.implications.size());
+    stats.cliques = static_cast<int>(res.mip.cliques.cliques.size());
+  }
   stats.rows_after = res.reduced.n_rows;
   stats.cols_after = res.reduced.n_cols;
   stats.nnz_after = res.reduced.A.nnz();

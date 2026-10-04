@@ -49,6 +49,28 @@ struct PresolveOptions {
   bool doubleton_equations = true;
   bool dual_fixing = true;
   bool integer_bounds = true;
+
+  // ---- MIP presolve (only with is_mip; all need primal postsolve only: no duals are reconstructed) ----
+  /// Activity-based bound propagation to a fixpoint (integer rounding, infeasibility detection).
+  bool mip_propagation = true;
+  /// Coefficient tightening (big-M reduction) of one-sided rows for binary columns.
+  bool coefficient_tightening = true;
+  /// Probing on binary columns: fix to 0 and to 1, propagate, derive fixings, bounds and implications.
+  bool probing = true;
+  /// Duplicate and parallel rows (the tighter range is kept), duplicate and dominated columns.
+  bool parallel_rows = true;
+  bool duplicate_columns = true;
+  /// Clique table from at-most-one structure and probing implications.
+  bool clique_table = true;
+  /// Rounds of (MIP reductions, standard passes); each round stops when nothing changes.
+  int mip_rounds = 5;
+  /// Work limits, in row or column entries touched (targets, not tuned).
+  long long propagation_work_limit = 20000000;
+  long long probing_work_limit = 20000000;
+  int probing_column_limit = 2000;  ///< binary columns probed per call
+  int max_cliques = 20000;
+  int max_clique_literals = 400000;
+  int max_implications = 200000;
 };
 
 struct PresolveStats {
@@ -75,6 +97,17 @@ struct PresolveStats {
   int integer_bounds_tightened = 0;
   int implied_bound_checks = 0;   // LP: implied bounds computed for detection only
   int unbounded_columns = 0;      // columns found to be free to improve without limit
+  // MIP reductions
+  int propagated_bounds = 0;      // bounds tightened by the propagation to a fixpoint (integer columns)
+  int coefficients_tightened = 0; // coefficients changed by coefficient tightening
+  int probing_fixings = 0;        // columns fixed by probing
+  int probing_bounds = 0;         // bounds tightened by probing (both branches imply them)
+  int implications = 0;           // implications stored
+  int cliques = 0;                // cliques in the table
+  int parallel_rows = 0;          // rows merged into a parallel row
+  int duplicate_columns = 0;      // identical integer columns merged
+  int dominated_columns = 0;      // columns fixed because a parallel column dominates them
+  long long mip_work = 0;         // entries touched by the MIP reductions
 
   /// (name, count) of every reduction counter, in a fixed order.
   std::vector<std::pair<std::string, int>> reduction_counts() const;
@@ -94,6 +127,28 @@ struct PostsolveStack {
   std::vector<std::shared_ptr<const PostsolveRecord>> records;
 };
 
+/// An implication found by probing: when column `var` takes the value `var_value` (a binary column), column `other`
+/// satisfies x_other <= bound (is_upper) or x_other >= bound. Indices are columns of the REDUCED model.
+struct Implication {
+  int var = 0;
+  int var_value = 0;
+  int other = 0;
+  bool is_upper = true;
+  double bound = 0.0;
+};
+
+/// Cliques of binary literals: a literal is 2 * column for x and 2 * column + 1 for 1 - x, columns of the REDUCED
+/// model. At most one literal of a clique can be 1 in an integer feasible point.
+struct CliqueTable {
+  std::vector<std::vector<int>> cliques;
+};
+
+/// Structure found by the MIP presolve for later use (cuts), in the index space of the reduced model.
+struct MipPresolveInfo {
+  std::vector<Implication> implications;
+  CliqueTable cliques;
+};
+
 struct PresolveResult {
   PresolveStatus status = PresolveStatus::Reduced;
   /// Always a minimization model (a max model is converted by negating costs
@@ -103,6 +158,8 @@ struct PresolveResult {
   PresolveStats stats;
   /// For Infeasible: the first conflict found (original row/column indices).
   std::string note;
+  /// Implications and cliques (MIP presolve only, status Reduced).
+  MipPresolveInfo mip;
 };
 
 /// Deterministic LP/MIP presolve. See docs/PRESOLVE.md.

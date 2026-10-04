@@ -24,6 +24,8 @@ PresolveOptions only(bool PresolveOptions::*flag) {
   o.empty_rows = o.empty_columns = o.fixed_columns = o.singleton_rows = false;
   o.redundant_rows = o.forcing_rows = o.doubleton_equations = o.dual_fixing = false;
   o.integer_bounds = false;
+  o.mip_propagation = o.coefficient_tightening = o.probing = false;
+  o.parallel_rows = o.duplicate_columns = o.clique_table = false;
   o.*flag = true;
   return o;
 }
@@ -499,7 +501,7 @@ TEST_CASE(presolve_reports_a_counter_per_reduction_and_the_model_sizes) {
   CHECK_EQ(pr.stats.nnz_before, std::size_t{1});
   CHECK(pr.stats.passes >= 1);
   const auto counts = pr.stats.reduction_counts();
-  CHECK_EQ(counts.size(), std::size_t{13});
+  CHECK_EQ(counts.size(), std::size_t{22});
   CHECK_EQ(counts[0].first, std::string("empty rows"));
   CHECK(pr.stats.seconds >= 0.0);
 }
