@@ -10,6 +10,7 @@ Testing/
 
 # Benchmark data (download only; never commit)
 data/raw/
+data/MANIFEST.txt
 
 # Editors
 .vscode/
