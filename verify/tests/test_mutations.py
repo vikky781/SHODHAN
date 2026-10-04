@@ -176,7 +176,7 @@ class MutationTests(unittest.TestCase):
         for p in sorted(glob.glob(os.path.join(CORPUS, "*.cert.json"))):
             with open(p) as f:
                 cert = json.load(f)
-            if cert["status"] in ("optimal", "infeasible", "unbounded"):
+            if cert["status"] in ("optimal", "infeasible", "unbounded", "feasible"):
                 cls.items.append((p.replace(".cert.json", ".mps"), cert))
 
     @classmethod
@@ -234,7 +234,7 @@ class MutationTests(unittest.TestCase):
     def test_corruptions_are_detected(self):
         rng = self.rng
         optimal = [(m, c) for m, c in self.items if c["status"] == "optimal"]
-        infeasible = [(m, c) for m, c in self.items if c["status"] == "infeasible"]
+        infeasible = [(m, c) for m, c in self.items if c["status"] == "infeasible" and "farkas" in c]
         unbounded = [(m, c) for m, c in self.items if c["status"] == "unbounded"]
         for mps, cert in rng.sample(optimal, min(len(optimal), 90)):
             self.mutate_optimal(mps, cert)
@@ -242,6 +242,9 @@ class MutationTests(unittest.TestCase):
             self.mutate_infeasible(mps, cert)
         for mps, cert in rng.sample(unbounded, min(len(unbounded), 40)):
             self.mutate_unbounded(mps, cert)
+        feasible = [(m, c) for m, c in self.items if c["status"] == "feasible"]
+        for mps, cert in rng.sample(feasible, min(len(feasible), 80)):
+            self.mutate_feasible(mps, cert)
         for mps, cert in rng.sample(self.items, min(len(self.items), 40)):
             self.mutate_metadata(mps, cert)
         res = self.res.count
@@ -430,8 +433,66 @@ class MutationTests(unittest.TestCase):
         c2["problem"]["rows"] = (c2["problem"]["rows"] or 0) + 1
         self.record("row count edited", "harmful", mps, c2)
         c2 = copy.deepcopy(cert)
-        c2["status"] = {"optimal": "infeasible", "infeasible": "unbounded", "unbounded": "optimal"}[cert["status"]]
+        c2["status"] = {"optimal": "infeasible", "infeasible": "unbounded", "unbounded": "optimal", "feasible": "unbounded"}[cert["status"]]
         self.record("status changed", "harmful", mps, c2)
+
+    def mutate_feasible(self, mps, cert):
+        """A MILP certificate (status feasible): break integrality, break a row, change the objective."""
+        model = parse_mps(read_bytes(mps), exact=True)
+        orc = Oracle(model)
+        rng = self.rng
+        x0 = self.dense(model.col_names, cert["x"])
+        ints = [j for j in range(model.n_cols) if model.col_integer[j]]
+        obj0 = orc.objective_min(x0)
+        scale = 1 + abs(obj0)
+
+        def with_x(x):
+            c2 = copy.deepcopy(cert)
+            c2["x"] = self.sparse(model.col_names, [float(v) for v in x])
+            return c2
+
+        # 1. Break integrality: move one integer column by a fraction (always harmful: integrality must be exact).
+        j = rng.choice(ints)
+        for delta in (F(1, 2), F(1, 100), F(1, 10 ** 5)):
+            x = list(x0)
+            x[j] = x[j] + delta
+            c2 = with_x(x)
+            self.record("MIP integrality broken", "harmful", mps, c2)
+        # 2. Break a row: push a column far enough that some row is violated by >= 1e-4 relative; if the oracle
+        #    says the point is still clearly feasible (or only mildly violated) the mutation is benign or gray.
+        for _ in range(3):
+            jj = rng.randrange(model.n_cols)
+            x = list(x0)
+            x[jj] = x[jj] + rng.choice((-1, 1)) * (1 + abs(x[jj])) * rng.choice((F(1, 10), F(1), F(10)))
+            c2 = with_x(x)
+            xf = self.dense(model.col_names, c2["x"])
+            if model.col_integer[jj]:
+                xf[jj] = F(round(xf[jj]))
+                x[jj] = xf[jj]
+                c2 = with_x(x)
+                xf = self.dense(model.col_names, c2["x"])
+            viol = orc.rel_violation(xf)
+            dobj = abs(orc.objective_min(xf) - obj0)
+            label = "harmful" if (viol >= HARM or (dobj >= HARM * scale and cert.get("claimed_objective") is not None)) else (
+                "benign" if viol <= BENIGN and dobj <= BENIGN * scale else "gray")
+            self.record("MIP row/bound broken", label, mps, c2)
+        # 3. Change the objective: the claimed value no longer matches the exact value of the point.
+        c2 = copy.deepcopy(cert)
+        c2["claimed_objective"] = cert["claimed_objective"] + (1 + abs(cert["claimed_objective"])) * 0.01
+        self.record("MIP claimed objective changed", "harmful", mps, c2)
+        c2 = copy.deepcopy(cert)
+        c2["claimed_objective"] = cert["claimed_objective"] * (1 + 1e-12)
+        self.record("MIP claimed objective changed", "benign", mps, c2)
+        # 4. A claimed bound on the wrong side of the objective (it contradicts the point), or claimed certified optimality.
+        if "claimed_best_bound" in cert:
+            c2 = copy.deepcopy(cert)
+            shift = (1 + abs(cert["claimed_objective"])) * 0.01
+            # a minimization bound above the objective (a maximization bound below it) contradicts the point
+            c2["claimed_best_bound"] = cert["claimed_objective"] + (shift if model.sense == "min" else -shift)
+            self.record("MIP bound on the wrong side", "harmful", mps, c2)
+        c2 = copy.deepcopy(cert)
+        c2["optimality_certified"] = True
+        self.record("MIP optimality claimed", "harmful", mps, c2)
 
 
 if __name__ == "__main__":

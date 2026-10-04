@@ -75,7 +75,7 @@ if(SHODHAN_BUILD_TESTS)
 
   # Corpus generator for the KASAUTI integration test (writes models and certificates into a directory).
   add_executable(shodhan_cert_corpus tests/corpus/cert_corpus.cpp tests/support/lp_families.cpp tests/support/random_lp.cpp
-                 tests/support/simplex_lps.cpp)
+                 tests/support/simplex_lps.cpp tests/support/mip_families.cpp)
   target_link_libraries(shodhan_cert_corpus PRIVATE shodhan_core)
   target_include_directories(shodhan_cert_corpus PRIVATE tests src)
   shodhan_configure_target(shodhan_cert_corpus)

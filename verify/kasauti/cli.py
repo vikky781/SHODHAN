@@ -159,6 +159,10 @@ def verify(model_path, cert_path, args, out=None):
                 raise checks.CertError("unknown status %r" % (status,))
             if not (sha_ok and not ident) and rep.detail.startswith("PASS"):
                 rep.detail = "FAIL"
+    except checks.Inconclusive as e:
+        rep.say(str(e))
+        rep.detail = "INCONCLUSIVE"
+        return 2, rep
     except checks.CertError as e:
         rep.say("malformed certificate: %s" % e)
         rep.detail = "FAIL"
@@ -188,7 +192,13 @@ def main(argv=None):
     label = rep.detail or ("PASS" if code == 0 else "FAIL")
     if code == 2:
         label = "INCONCLUSIVE"
-    print("VERDICT: " + label + ("" if code != 0 else ("  (rigorous: exact arithmetic)" if rep.rigorous else "  (tolerance-checked, not a proof: see the lines above)")))
+    if code != 0:
+        suffix = ""
+    elif label == "PASS_FEASIBLE":
+        suffix = "  (feasibility and integrality exact; optimality NOT certified)" if rep.rigorous else "  (feasibility within tolerance; optimality NOT certified)"
+    else:
+        suffix = "  (rigorous: exact arithmetic)" if rep.rigorous else "  (tolerance-checked, not a proof: see the lines above)"
+    print("VERDICT: " + label + suffix)
     if args.report:
         rep.data["verdict"] = label
         rep.data["lines"] = rep.lines

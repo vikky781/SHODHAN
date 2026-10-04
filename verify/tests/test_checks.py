@@ -233,5 +233,55 @@ class FeasibleTests(unittest.TestCase):
         self.assertEqual(verify(self.MIP, self.cert({"X": 4, "Y": 1}))[0], 1)
 
 
+class MipFeasibleTests(unittest.TestCase):
+    """Certificates of MILP results: status feasible with exact integrality, a claimed objective and an unverified bound."""
+
+    MIP = FeasibleTests.MIP
+
+    def full(self, x=None, **extra):
+        cert = make_cert(self.MIP, "feasible", {"x": x or {"X": 3, "Y": 1.5}}, rows=1, cols=2, nnz=2, n_integer=1)
+        cert.update({"claimed_objective": -4.5, "optimality_certified": False})
+        cert.update(extra)
+        return cert
+
+    def test_integrality_must_be_exact(self):
+        self.assertEqual(verify(self.MIP, self.full({"X": 3.0000001, "Y": 1.5}))[0], 1)
+        self.assertEqual(verify(self.MIP, self.full({"X": 3.0, "Y": 1.5}))[0], 0)
+
+    def test_claimed_objective_is_checked_exactly(self):
+        self.assertEqual(verify(self.MIP, self.full())[0], 0)
+        self.assertEqual(verify(self.MIP, self.full(claimed_objective=-4.0))[0], 1)
+
+    def test_a_claimed_bound_is_reported_as_not_verified(self):
+        code, rep = verify(self.MIP, self.full(claimed_best_bound=-5.0, claimed_gap=0.1, nodes=7))
+        self.assertEqual((code, rep.detail), (0, "PASS_FEASIBLE"))
+        text = chr(10).join(rep.lines)
+        self.assertIn("bound NOT verified", text)
+        self.assertIn("optimality not certified", text)
+
+    def test_a_bound_on_the_wrong_side_of_the_objective_fails(self):
+        # minimization: the bound must not exceed the objective -4.5
+        self.assertEqual(verify(self.MIP, self.full(claimed_best_bound=-4.0))[0], 1)
+
+    def test_claiming_certified_optimality_fails(self):
+        self.assertEqual(verify(self.MIP, self.full(optimality_certified=True))[0], 1)
+
+    def test_a_missing_bound_is_still_labelled(self):
+        code, rep = verify(self.MIP, self.full())
+        self.assertTrue(any("bound NOT verified" in line for line in rep.lines))
+
+
+class UncertifiedInfeasibilityTests(unittest.TestCase):
+    def test_infeasibility_without_a_certificate_is_inconclusive(self):
+        cert = make_cert(TINY, "infeasible", {"certified": False}, **TINY_PROB)
+        code, rep = verify(TINY, cert)
+        self.assertEqual((code, rep.detail), (2, "INCONCLUSIVE"))
+        self.assertTrue(any("NOT verified" in line for line in rep.lines))
+
+    def test_infeasibility_without_a_body_and_without_the_flag_is_malformed(self):
+        cert = make_cert(TINY, "infeasible", {}, **TINY_PROB)
+        self.assertEqual(verify(TINY, cert)[0], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

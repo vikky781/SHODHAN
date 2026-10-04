@@ -40,12 +40,10 @@ std::string certificate_status(const LpResult& r) {
   }
 }
 
-void write_certificate(const LpModel& model, const CertificateContext& ctx, const LpResult& r, std::ostream& out) {
-  const std::string status = certificate_status(r);
+// The members every certificate starts with, up to and including "status". The object stays open.
+static void write_head(JsonWriter& w, const LpModel& model, const CertificateContext& ctx, const std::string& status) {
   std::size_t n_integer = 0;
   for (const ColType t : model.col_type) n_integer += t != ColType::Continuous ? 1 : 0;
-
-  JsonWriter w(out);
   w.begin_object();
   w.key("format");
   w.value("shodhan-cert");
@@ -77,6 +75,12 @@ void write_certificate(const LpModel& model, const CertificateContext& ctx, cons
   w.end_object();
   w.key("status");
   w.value(status);
+}
+
+void write_certificate(const LpModel& model, const CertificateContext& ctx, const LpResult& r, std::ostream& out) {
+  const std::string status = certificate_status(r);
+  JsonWriter w(out);
+  write_head(w, model, ctx, status);
   if (status == "optimal") {
     w.key("claimed_objective");
     w.value(r.solution.objective);
@@ -143,6 +147,89 @@ bool write_certificate_file(const LpModel& model, const CertificateContext& ctx,
     return false;
   }
   write_certificate(model, ctx, r, out);
+  out.close();
+  if (!out) {
+    if (error != nullptr) *error = "error while writing '" + path + "'";
+    return false;
+  }
+  return true;
+}
+
+std::string mip_certificate_status(const mip::MipResult& r) {
+  if (r.has_solution && !r.solution.x.empty()) return "feasible";
+  if (r.status == Status::Infeasible) return "infeasible";
+  return "other";
+}
+
+void write_mip_certificate(const LpModel& model, const CertificateContext& ctx, const mip::MipResult& r, std::ostream& out) {
+  const std::string status = mip_certificate_status(r);
+  JsonWriter w(out);
+  write_head(w, model, ctx, status);
+  w.key("tolerances");
+  w.begin_object();
+  w.key("primal_tol");
+  w.value(ctx.options.params.primal_tol);
+  w.key("int_tol");
+  w.value(ctx.int_tol);
+  w.key("mip_gap");
+  w.value(ctx.mip_gap);
+  w.key("mip_abs_gap");
+  w.value(ctx.mip_abs_gap);
+  w.end_object();
+  w.key("attempts");
+  w.begin_object();
+  w.key("count");
+  w.value(1);
+  w.key("configuration");
+  w.value("branch-and-bound");
+  w.end_object();
+  w.key("mip_status");
+  w.value(std::string(to_string(r.status)));
+  w.key("nodes");
+  w.value(r.nodes_processed);
+  w.key("optimality_certified");
+  w.value(false);
+  if (status == "feasible") {
+    w.key("claimed_objective");
+    w.value(r.objective);
+    if (r.has_bound) {
+      w.key("claimed_best_bound");
+      w.value(r.best_bound);
+      w.key("claimed_gap");
+      w.value(r.rel_gap);
+      w.key("claimed_gap_abs");
+      w.value(r.abs_gap);
+    }
+    w.key("x");
+    write_sparse(w, r.solution.x, [&](Index j) { return col_name(model, j); });
+  } else if (status == "infeasible") {
+    if (r.lp_infeasible_certified && !r.lp_farkas.empty()) {
+      w.key("certified");
+      w.value(true);
+      w.key("farkas");
+      w.begin_object();
+      w.key("y");
+      write_sparse(w, r.lp_farkas, [&](Index i) { return row_name(model, i); });
+      w.end_object();
+    } else {
+      w.key("certified");
+      w.value(false);
+      w.key("note");
+      w.value("infeasibility was proved by branching or presolve: there is no certificate");
+    }
+  }
+  w.end_object();
+  out << '\n';
+}
+
+bool write_mip_certificate_file(const LpModel& model, const CertificateContext& ctx, const mip::MipResult& r, const std::string& path,
+                                std::string* error) {
+  std::ofstream out(path, std::ios::binary);
+  if (!out) {
+    if (error != nullptr) *error = "cannot open '" + path + "' for writing";
+    return false;
+  }
+  write_mip_certificate(model, ctx, r, out);
   out.close();
   if (!out) {
     if (error != nullptr) *error = "error while writing '" + path + "'";

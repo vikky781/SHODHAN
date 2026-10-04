@@ -126,3 +126,72 @@ TEST_CASE(certificate_uses_default_names_for_a_model_without_names) {
   CHECK(has(s, "\"C1\": 3"));
   CHECK(has(s, "\"R1\": 1"));
 }
+
+namespace {
+
+std::string mip_text(const LpModel& m, const mip::MipResult& r) {
+  std::ostringstream os;
+  write_mip_certificate(m, context(m), r, os);
+  return os.str();
+}
+
+}  // namespace
+
+TEST_CASE(mip_certificate_of_an_incumbent_is_feasible_with_unverified_bound_fields) {
+  const LpModel m = named_model();
+  mip::MipResult r;
+  r.status = Status::NodeLimit;  // stopped early: still a verified incumbent
+  r.has_solution = true;
+  r.solution.x = {3.0, 0.0};
+  r.objective = 3.0;
+  r.has_bound = true;
+  r.best_bound = 2.5;
+  r.abs_gap = 0.5;
+  r.rel_gap = 0.125;
+  r.nodes_processed = 7;
+  const std::string s = mip_text(m, r);
+  CHECK_EQ(mip_certificate_status(r), "feasible");
+  CHECK(has(s, "\"status\": \"feasible\""));
+  CHECK(has(s, "\"optimality_certified\": false"));
+  CHECK(has(s, "\"claimed_objective\": 3"));
+  CHECK(has(s, "\"claimed_best_bound\": 2.5"));
+  CHECK(has(s, "\"claimed_gap\": 0.125"));
+  CHECK(has(s, "\"nodes\": 7"));
+  CHECK(has(s, "\"mip_status\": \"NodeLimit\""));
+  CHECK(has(s, "\"x\":"));
+  CHECK(!has(s, "\"y\":"));
+  CHECK(!has(s, "farkas"));
+}
+
+TEST_CASE(mip_certificate_infeasible_has_a_body_only_when_the_lp_relaxation_is_infeasible) {
+  const LpModel m = named_model();
+  mip::MipResult branch;
+  branch.status = Status::Infeasible;  // proved by branching
+  std::string s = mip_text(m, branch);
+  CHECK_EQ(mip_certificate_status(branch), "infeasible");
+  CHECK(has(s, "\"status\": \"infeasible\""));
+  CHECK(has(s, "\"certified\": false"));
+  CHECK(!has(s, "farkas"));
+
+  mip::MipResult lp;
+  lp.status = Status::Infeasible;
+  lp.lp_infeasible_certified = true;
+  lp.lp_farkas = {1.0};
+  s = mip_text(m, lp);
+  CHECK(has(s, "\"certified\": true"));
+  CHECK(has(s, "farkas"));
+  CHECK(has(s, "\"y\":"));
+}
+
+TEST_CASE(mip_certificate_without_a_solution_or_an_infeasibility_proof_is_other) {
+  const LpModel m = named_model();
+  for (const Status st : {Status::TimeLimit, Status::NodeLimit, Status::InfeasibleOrUnbounded, Status::NumericalError}) {
+    mip::MipResult r;
+    r.status = st;
+    CHECK_EQ(mip_certificate_status(r), "other");
+    const std::string s = mip_text(m, r);
+    CHECK(has(s, "\"status\": \"other\""));
+    CHECK(has(s, "\"optimality_certified\": false"));
+    CHECK(!has(s, "claimed_objective"));
+  }
+}

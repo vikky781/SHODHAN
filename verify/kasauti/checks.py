@@ -87,6 +87,10 @@ class CertError(Exception):
     """The certificate is malformed (reported as INCONCLUSIVE or FAIL by the caller)."""
 
 
+class Inconclusive(Exception):
+    """The certificate is well formed but certifies nothing the verifier can check (exit code 2)."""
+
+
 def _vector(arith, mapping, index, kind):
     """name -> value mapping to a dense list by index; unknown names are an error."""
     out = [arith.zero] * len(index)
@@ -345,6 +349,9 @@ def _disjoint(r, c):
 
 def check_infeasible(model, cert, ar, opt, rep):
     body = cert.get("farkas")
+    if body is None and cert.get("certified") is False:
+        # Infeasibility proved by branching (or presolve): there is nothing to check, and it is not verified.
+        raise Inconclusive("infeasibility is claimed without a certificate (it was proved by branching or presolve): NOT verified")
     if not isinstance(body, dict) or "y" not in body:
         raise CertError("the infeasible certificate needs farkas.y")
     y = _vector(ar, body["y"], model.row_index, "row")
@@ -469,6 +476,8 @@ def check_unbounded(model, cert, ar, opt, rep):
 
 # --------------------------------------------------------------------------------------------
 def check_feasible(model, cert, ar, opt, rep):
+    """A feasible point (MILP result): primal feasibility, EXACT integrality of the integer columns, the exact
+    objective. A claimed best bound is reported, never verified."""
     x = _vector(ar, cert.get("x", {}), model.col_index, "column")
     abs_v, rel_v, where, _ = primal_violation(model, ar, x)
     feas_ok = rel_v <= opt.primal_tol
@@ -477,20 +486,49 @@ def check_feasible(model, cert, ar, opt, rep):
     worst_int = ar.zero
     for j in range(model.n_cols):
         if model.col_integer[j]:
-            nearest = round(x[j]) if not ar.exact else Fraction(round(x[j]))
-            dev = ar.absval(x[j] - nearest)
-            worst_int = max(worst_int, dev)
-    int_ok = worst_int <= opt.int_tol
-    rep.say("integrality: largest distance from an integer %s over %d integer column(s)" % (fmt(worst_int), model.n_integer))
-    rep.check("integrality", int_ok, max_deviation=worst_int, tolerance=opt.int_tol)
+            nearest = Fraction(round(x[j])) if ar.exact else float(round(x[j]))
+            worst_int = max(worst_int, ar.absval(x[j] - nearest))
+    int_ok = worst_int == 0  # the solver snaps integer columns: exactly integral is required
+    rep.say("integrality: largest distance from an integer %s over %d integer column(s) (must be exactly 0)" % (fmt(worst_int), model.n_integer))
+    rep.check("integrality", int_ok, max_deviation=worst_int)
     c, offset = internal_costs(model, ar)
     obj = _sense_sign(model) * (offset + ar.total([c[j] * x[j] for j in range(model.n_cols) if x[j] != 0]))
     rep.say("exact objective (model sense): %s" % fmt(obj))
-    ok = feas_ok and int_ok
     rep.data["primal_objective"] = _jsonable(obj)
+    ok = feas_ok and int_ok
+    claimed = cert.get("claimed_objective")
+    if claimed is not None:
+        cl = ar.num(claimed)
+        diff = ar.absval(cl - obj)
+        match = diff <= opt.gap_tol * (1 + ar.absval(obj))
+        rep.say("claimed objective %s versus exact %s: difference %s" % (fmt(cl), fmt(obj), fmt(diff)))
+        rep.check("claimed_objective", match, claimed=cl, exact=obj, difference=diff)
+        ok = ok and match
+    if cert.get("optimality_certified") is True:
+        rep.say("the certificate claims optimality_certified = true: a feasible-point certificate cannot certify optimality")
+        rep.check("optimality_claim", False)
+        ok = False
+    bound = cert.get("claimed_best_bound")
+    if bound is not None:
+        bd = ar.num(bound)
+        # a minimization bound must not exceed the objective, a maximization bound must not fall below it
+        wrong_side = bd > obj + opt.gap_tol * (1 + ar.absval(obj)) if model.sense == "min" else bd < obj - opt.gap_tol * (1 + ar.absval(obj))
+        rep.say("claimed best bound %s (%s): bound NOT verified" % (fmt(bd), "a lower bound" if model.sense == "min" else "an upper bound"))
+        if cert.get("claimed_gap") is not None:
+            rep.say("claimed gap %s (not verified)" % (cert["claimed_gap"],))
+        if wrong_side:
+            rep.say("the claimed bound lies on the wrong side of the objective: the certificate contradicts itself")
+        rep.check("claimed_bound_consistent", not wrong_side, claimed_bound=bd, exact_objective=obj)
+        ok = ok and not wrong_side
+    else:
+        rep.say("no best bound is claimed: bound NOT verified")
+    if "nodes" in cert:
+        rep.say("search: %s node(s) processed (not verified)" % (cert["nodes"],))
     rep.detail = "PASS_FEASIBLE" if ok else "FAIL"
+    # "rigorous" here only means the feasibility and integrality claims are exact; optimality is never claimed.
+    rep.rigorous = ok and ar.exact and abs_v == 0
     if ok:
-        rep.say("optimality not certified")
+        rep.say("optimality not certified: only feasibility, integrality and the objective value were checked")
     return ok
 
 
