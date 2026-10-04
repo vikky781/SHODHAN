@@ -28,6 +28,10 @@ function(shodhan_configure_target target)
   else()
     target_compile_options(${target} PRIVATE
       -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    # No fused multiply-add contraction: arm64 compilers fuse a*b+c by default, which changes the rounding of
+    # the simplex arithmetic (and so the path of some numerically delicate LPs) compared with x86-64. With
+    # contraction off every platform performs the same IEEE operations.
+    target_compile_options(${target} PRIVATE -ffp-contract=off)
     if(SHODHAN_WERROR)
       target_compile_options(${target} PRIVATE -Werror)
     endif()
