@@ -14,6 +14,17 @@
 #include "support/lu_testing.hpp"
 #include "test_harness.hpp"
 
+// Under AddressSanitizer the replaced operator new/delete conflict with the sanitizer's own allocator
+// interception (alloc-dealloc-mismatch), so the replacement is left out and the counting test is skipped
+// visibly there; the normal builds run it.
+#if defined(__SANITIZE_ADDRESS__)
+#define SHODHAN_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SHODHAN_ASAN 1
+#endif
+#endif
+
 // GCC reports a mismatch between the replaced operator new (malloc) and operator
 // delete (free) when they are inlined at a use site; the pair is consistent.
 #if defined(__GNUC__)
@@ -32,6 +43,7 @@ struct CountGuard {
 
 }  // namespace
 
+#ifndef SHODHAN_ASAN
 void* operator new(std::size_t n) {
   if (g_counting) ++g_allocations;
   if (void* p = std::malloc(n == 0 ? 1 : n)) return p;
@@ -46,6 +58,7 @@ void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#endif
 
 using namespace shodhan;
 using namespace shodhan::testing;
@@ -100,6 +113,10 @@ long run_cycles(BasisFactor& f, const TestBasis& tb, std::vector<Index>& basis, 
 }  // namespace
 
 TEST_CASE(lu_no_allocation_in_solves_and_updates_after_warm_up) {
+#ifdef SHODHAN_ASAN
+  std::cout << "    SKIPPED under AddressSanitizer: allocations cannot be counted with the sanitizer allocator\n";
+  return;
+#endif
   {
     // Control: the counter does see an allocation made inside a guard.
     const long before = g_allocations;
