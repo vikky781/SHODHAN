@@ -66,6 +66,24 @@ struct MipOptions {
   /// Feasibility Jump work limit: matrix entries touched before giving up.
   long long fj_work_limit = 2000000;
 
+  // ---- cutting planes at the root (docs/CUTS.md); all values are targets ----
+  bool cuts = true;                  ///< master switch
+  int cut_rounds = 20;               ///< maximum rounds of separation
+  int cut_stall_rounds = 3;          ///< stop after this many consecutive rounds of small progress
+  double cut_min_progress = 1e-6;    ///< relative LP bound gain below which a round counts as small progress
+  int cut_max_per_round = 100;       ///< cuts added per round at most
+  double cut_min_efficacy = 1e-4;    ///< violation / ||coefficients|| a cut needs at the LP point
+  double cut_max_parallelism = 0.95; ///< cosine above which a cut is dropped in favour of a better one of the round
+  double cut_max_dynamism = 1e6;     ///< largest allowed ratio of the largest to the smallest |coefficient|
+  double cut_max_density = 0.6;      ///< maximum share of the columns a cut may touch (when there are more than 40)
+  double cut_rhs_relaxation = 1e-9;  ///< right-hand sides are relaxed by this relative amount against rounding
+  int cut_age_limit = 5;             ///< a cut slack for this many rounds is removed from the LP
+  int cut_mir_aggregation = 5;       ///< rows combined by the MIR separator at most
+  int cut_gomory_rows = 100;         ///< tableau rows examined per round at most
+  bool cut_gomory = true, cut_mir = true, cut_cover = true, cut_clique = true, cut_implied_bound = true;
+  /// Without presolve, compute cliques and implications by probing the model before the root cut loop.
+  bool cut_structure = true;
+
   // ---- pipeline ----
   bool presolve = true;
   bool scaling = true;

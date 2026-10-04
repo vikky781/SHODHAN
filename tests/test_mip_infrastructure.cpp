@@ -83,6 +83,7 @@ TEST_CASE(open_set_gives_the_smallest_bound) {
 TEST_CASE(incumbent_manager_verifies_snaps_completes_and_counts_rejections) {
   const LpModel m = small_mip();
   MipOptions opt;
+  opt.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
   IncumbentManager inc(m, nullptr, opt);
   CHECK(!inc.has_incumbent());
 
@@ -118,6 +119,7 @@ TEST_CASE(incumbent_manager_accepts_a_pure_integer_point_without_an_lp) {
   m.col_type[3] = ColType::Integer;
   m.col_upper[3] = 1.0;
   MipOptions opt;
+  opt.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
   IncumbentManager inc(m, nullptr, opt);
   CHECK(inc.submit({1.0, 0.0, 1.0, 1.0}, "x") == SubmitOutcome::Accepted);
   CHECK_EQ(inc.objective(), 9.0);
@@ -133,6 +135,7 @@ TEST_CASE(incumbent_manager_maps_presolved_points_back_and_reports_the_original_
   po.need_duals = false;
   const PresolveResult pre = presolve(m, po);
   MipOptions opt;
+  opt.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
   CHECK(pre.status == PresolveStatus::Reduced);
   if (pre.status != PresolveStatus::Reduced) return;
   IncumbentManager inc(m, &pre.stack, opt);

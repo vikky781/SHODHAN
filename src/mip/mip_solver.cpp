@@ -10,6 +10,7 @@
 #include <sstream>
 
 #include "shodhan/lp_solver.hpp"
+#include "shodhan/mip/cuts.hpp"
 #include "shodhan/mip/granularity.hpp"
 #include "shodhan/mip/incumbent.hpp"
 #include "shodhan/mip/node_tree.hpp"
@@ -52,6 +53,8 @@ class Search {
 
   // ---- setup ----
   bool setup_presolve(MipResult& res);
+  enum class CutOutcome { Done, Infeasible, Abandoned };
+  CutOutcome run_root_cuts();
   void setup_engine();
   void make_plugins();
   SearchState make_state();
@@ -87,6 +90,12 @@ class Search {
   LpModel sm_;  // scaled copy for the engine
   Scaling sc_;
   std::unique_ptr<SimplexEngine> engine_;
+  SimplexOptions so_;
+  MipPresolveInfo structure_;
+  bool cuts_done_ = false;
+  CutStats cut_stats_;
+  bool cuts_abandoned_ = false, cuts_infeasible_ = false;
+  long long base_iterations_ = 0;  ///< iterations of engines that were replaced (abandoned cut loop)
   std::unique_ptr<IncumbentManager> inc_;
 
   // search structures (live_bases_ before tree_: shared snapshots decrement it when destroyed)
@@ -193,6 +202,7 @@ void Search::setup_engine() {
   so.dual_tol = opt_.params.dual_tol;
   so.seed = opt_.params.seed;
   so.final_check = true;  // the root LP is checked; node LPs are not (see solve_node_lp)
+  so_ = so;
   engine_ = std::make_unique<SimplexEngine>(sm_, so);
   for (Index j = 0; j < pm_.n_cols; ++j) {
     if (pm_.is_integer(j)) int_cols_.push_back(j);
@@ -245,7 +255,7 @@ SearchState Search::make_state() {
   s.submit = [this](const std::vector<double>& x, const std::string& src) { return submit(x, src); };
   s.cutoff = [this]() { return incumbent_min(); };
   s.time_up = [this]() { return time_up(); };
-  s.lp_iterations = [this]() { return engine_->stats().iterations + extra_lp_iterations_; };
+  s.lp_iterations = [this]() { return base_iterations_ + engine_->stats().iterations + extra_lp_iterations_; };
   s.count_strong_solve = [this]() { ++strong_calls_; };
   s.add_iterations = [this](long long n, bool strong) {
     if (strong) strong_iterations_ += n;
@@ -354,6 +364,60 @@ Search::LpOutcome Search::solve_node_lp(bool is_root) {
   }
 }
 
+// The root cut loop (docs/CUTS.md) on the engine. Afterwards the engine holds the LP with the kept cuts, or - when
+// a resolve failed numerically - a fresh engine without cuts.
+Search::CutOutcome Search::run_root_cuts() {
+  const Clock::time_point t0 = Clock::now();
+  if (presolved_) {
+    structure_ = pre_.mip;
+  } else if (opt_.cut_structure) {
+    PresolveOptions po;
+    po.is_mip = true;
+    structure_ = find_mip_structure(pm_, po);
+  }
+  CutLoopInput in;
+  in.model = &pm_;
+  in.lo = &root_lo_;
+  in.hi = &root_hi_;
+  in.structure = &structure_;
+  in.engine = engine_.get();
+  in.scaling = &sc_;
+  in.options = &opt_;
+  bool timed_out = false;
+  in.resolve = [&]() {
+    switch (solve_node_lp(true)) {
+      case LpOutcome::Optimal: return CutLpOutcome::Optimal;
+      case LpOutcome::Infeasible: return CutLpOutcome::Infeasible;
+      case LpOutcome::TimeLimit: timed_out = true; return CutLpOutcome::Failed;
+      default: return CutLpOutcome::Failed;
+    }
+  };
+  in.time_up = [this]() { return time_up(); };
+  const long long it_before = engine_->stats().iterations;
+  CutLoopResult res = run_root_cut_loop(in);
+  cut_stats_ = res.stats;
+  cut_iterations_ += engine_->stats().iterations - it_before;
+  if (res.stats.infeasible) {
+    t_cuts_ += seconds_since(t0);
+    return CutOutcome::Infeasible;
+  }
+  if (res.stats.lp_failed) {
+    if (timed_out || time_up()) {
+      // The next solve reports the time limit; the engine is left as it is.
+      t_cuts_ += seconds_since(t0);
+      return CutOutcome::Done;
+    }
+    cuts_abandoned_ = true;
+    base_iterations_ += engine_->stats().iterations;
+    engine_ = std::make_unique<SimplexEngine>(sm_, so_);
+    apply_bounds();
+    t_cuts_ += seconds_since(t0);
+    return CutOutcome::Abandoned;
+  }
+  t_cuts_ += seconds_since(t0);
+  return CutOutcome::Done;
+}
+
 void Search::run_heuristics(HeuristicWhen when, NodeId id) {
   if (!opt_.heuristics) return;
   const Index depth = id == kNoNode ? 0 : tree_.at(id).depth;
@@ -386,7 +450,7 @@ void Search::log_progress(bool force) {
   if (is_inf(lb)) os << std::setw(14) << "-";
   else os << std::setw(14) << std::setprecision(8) << sense * lb;
   if (inc < kInf && !is_inf(lb)) os << "  gap " << std::fixed << std::setprecision(3) << 100.0 * (inc - lb) / std::max(1.0, std::fabs(inc)) << "%" << std::defaultfloat;
-  os << "  iters " << engine_->stats().iterations + extra_lp_iterations_ << "  time " << std::fixed << std::setprecision(2) << elapsed() << " s\n";
+  os << "  iters " << base_iterations_ + engine_->stats().iterations + extra_lp_iterations_ << "  time " << std::fixed << std::setprecision(2) << elapsed() << " s\n";
   *opt_.log << os.str();
 }
 
@@ -442,6 +506,17 @@ NodeId Search::process_impl(NodeId id, bool plunged) {
     }
     if (is_root && round == 0) root_iterations_ = engine_->stats().iterations;
     capture_lp(node_lp_);
+    if (is_root && !cuts_done_ && opt_.cuts && !node_lp_.fractional.empty()) {
+      cuts_done_ = true;
+      const CutOutcome co = run_root_cuts();
+      if (co == CutOutcome::Infeasible) {
+        cuts_infeasible_ = true;
+        ++pruned_infeasible_;
+        return kNoNode;
+      }
+      if (pending_stop_ != Stop::None) return kNoNode;
+      continue;  // the LP with the cuts (or without them after an abandoned loop) is solved and captured again
+    }
     const double z = node_lp_.objective;
     // Pseudocost update from the observed gain of the branching that created this node.
     {
@@ -568,13 +643,37 @@ void Search::finalize(MipResult& res, Stop stop, bool preset) {
   // Open nodes that could still improve the incumbent (stale ones are pruned lazily and not counted).
   const double open_threshold = incumbent_min() >= kInf ? kInf : incumbent_min() - 1e-9 * std::max(1.0, std::fabs(incumbent_min()));
   res.nodes_open = static_cast<long long>(open_.count_below(open_threshold)) + (pending_node_ != kNoNode ? 1 : 0);
-  const long long engine_iterations = engine_ ? engine_->stats().iterations : 0;
+  const long long engine_iterations = base_iterations_ + (engine_ ? engine_->stats().iterations : 0);
   res.lp_iterations = engine_iterations + extra_lp_iterations_;
   res.root_lp_iterations = root_iterations_;
-  res.node_lp_iterations = engine_iterations - root_iterations_ - cut_iterations_;
+  res.node_lp_iterations = std::max<long long>(0, engine_iterations - root_iterations_ - cut_iterations_);
   res.diving_iterations = extra_lp_iterations_;
   res.cut_lp_iterations = cut_iterations_;
   res.seconds_cuts = t_cuts_;
+  if (cuts_done_ && cut_stats_.rounds + cut_stats_.cuts_added >= 0) {
+    CutSummary& cs = res.cuts;
+    cs.ran = true;
+    cs.rounds = cut_stats_.rounds;
+    cs.cuts_added = cut_stats_.cuts_added;
+    cs.cuts_removed = cut_stats_.cuts_removed;
+    cs.cuts_kept = cut_stats_.cuts_kept;
+    const double sense_sign = original_.sense == Sense::Maximize ? -1.0 : 1.0;
+    cs.has_bounds = true;
+    cs.root_bound_without_cuts = sense_sign * cut_stats_.root_bound_before;
+    cs.root_bound_with_cuts = sense_sign * cut_stats_.root_bound_after;
+    cs.abandoned = cuts_abandoned_;
+    cs.infeasible = cuts_infeasible_;
+    cs.stopped_because = cut_stats_.stopped_because;
+    for (int s = 0; s < kNumSeparators; ++s) {
+      CutSeparatorSummary ss;
+      ss.name = separator_name(s);
+      ss.generated = cut_stats_.sep[s].generated;
+      ss.candidates = cut_stats_.sep[s].candidates;
+      ss.added = cut_stats_.sep[s].added;
+      ss.seconds = cut_stats_.sep[s].seconds;
+      cs.separators.push_back(ss);
+    }
+  }
   for (const HeuristicStats& h : hstats_) {
     if (h.name.rfind("diving", 0) == 0) res.seconds_diving += h.seconds;
   }
@@ -654,7 +753,7 @@ void Search::finalize(MipResult& res, Stop stop, bool preset) {
       } else {
         res.status = Status::Infeasible;
         res.has_bound = false;
-        res.message = root_lp_infeasible_ ? "the LP relaxation is infeasible" : "no integer feasible point exists (proved by branching; no certificate)";
+        res.message = cuts_infeasible_ ? "the LP relaxation with cutting planes is infeasible (no certificate)" : root_lp_infeasible_ ? "the LP relaxation is infeasible" : "no integer feasible point exists (proved by branching; no certificate)";
         attach_lp_certificate(res);
       }
       break;

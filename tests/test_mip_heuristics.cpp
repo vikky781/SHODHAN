@@ -188,6 +188,7 @@ TEST_CASE(a_rogue_heuristic_inside_a_search_never_corrupts_the_result) {
     const MipRefResult ref = solve_mip_brute_force(m);
     if (ref.status != Status::Optimal) continue;
     MipOptions o;
+    o.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
     o.mip_gap = 1e-9;
     o.mip_abs_gap = 1e-9;
     o.params.verbosity = 0;
@@ -214,6 +215,8 @@ TEST_CASE(heuristics_on_and_off_give_the_same_optimum) {
     for (std::uint64_t seed = 201; seed <= 235; ++seed) {
       const LpModel m = make_mip_instance(f, seed);
       MipOptions on, off;
+      on.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
+      off.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
       on.mip_gap = off.mip_gap = 1e-9;
       on.mip_abs_gap = off.mip_abs_gap = 1e-9;
       on.params.verbosity = off.params.verbosity = 0;
@@ -239,6 +242,7 @@ TEST_CASE(heuristics_on_and_off_give_the_same_optimum) {
 TEST_CASE(search_reports_per_heuristic_statistics) {
   const LpModel m = make_mip_instance(kMipSetCover, 7);
   MipOptions o;
+  o.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
   o.params.verbosity = 0;
   const MipResult r = MipSolver(o).solve(m);
   CHECK_EQ(r.heuristics.size(), 5u);

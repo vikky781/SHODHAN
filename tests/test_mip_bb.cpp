@@ -22,6 +22,7 @@ namespace {
 
 MipOptions exact_options() {
   MipOptions o;
+  o.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
   o.mip_gap = 1e-9;
   o.mip_abs_gap = 1e-9;
   o.params.verbosity = 0;

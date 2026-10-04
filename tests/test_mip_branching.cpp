@@ -24,7 +24,11 @@ struct Harness {
   LpModel model;
   Scaling scaling;
   std::unique_ptr<SimplexEngine> engine;
-  MipOptions options;
+  MipOptions options = [] {
+    MipOptions o;
+    o.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
+    return o;
+  }();
   Pseudocosts pseudo;
   Random rng{1};
   std::vector<Index> int_cols;
@@ -189,6 +193,7 @@ TEST_CASE(every_branching_rule_and_node_selector_reach_the_same_optimum_on_300_m
       for (const BranchingKind br : {BranchingKind::Reliability, BranchingKind::Pseudocost, BranchingKind::MostFractional, BranchingKind::FirstIndex}) {
         for (const NodeSelectKind sel : {NodeSelectKind::BestBound, NodeSelectKind::DepthFirst, NodeSelectKind::BestEstimate}) {
           MipOptions o;
+          o.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
           o.mip_gap = 1e-9;
           o.mip_abs_gap = 1e-9;
           o.params.verbosity = 0;

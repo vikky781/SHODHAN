@@ -25,6 +25,7 @@ constexpr int kSeedsPerFamily = 105;  // 10 families x 105 = 1050 instances
 
 MipOptions tight_options() {
   MipOptions o;
+  o.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
   o.mip_gap = 1e-9;
   o.mip_abs_gap = 1e-9;
   o.params.verbosity = 0;
@@ -147,6 +148,7 @@ TEST_CASE(mip_search_is_deterministic_for_a_seed) {
     for (std::uint64_t seed = 9001; seed <= 9020; ++seed) {
       const LpModel m = make_mip_instance(f, seed);
       MipOptions o;
+      o.cuts = false;  // these tests exercise the tree search, see test_cuts.cpp for cuts
       o.params.verbosity = 0;
       o.params.seed = 17;
       const MipResult a = MipSolver(o).solve(m);

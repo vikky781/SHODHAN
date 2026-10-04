@@ -28,6 +28,29 @@ struct RejectionStats {
   long long total() const { return not_better + not_integral + row_violated + column_violated + lp_resolve_failed + wrong_size; }
 };
 
+/// One separator's share of the root cut loop.
+struct CutSeparatorSummary {
+  std::string name;
+  long long generated = 0;   ///< raw candidates
+  long long candidates = 0;  ///< passed cleaning and the efficacy filter
+  long long added = 0;       ///< rows added to the LP
+  double seconds = 0.0;
+};
+
+/// What the root cut loop did (docs/CUTS.md). Bounds are in the model's own sense.
+struct CutSummary {
+  bool ran = false;
+  int rounds = 0;
+  long long cuts_added = 0, cuts_removed = 0, cuts_kept = 0;
+  bool has_bounds = false;
+  double root_bound_without_cuts = 0.0;  ///< the LP bound before the first round
+  double root_bound_with_cuts = 0.0;     ///< the LP bound after the last round
+  bool abandoned = false;                ///< a resolve failed numerically; the cuts were dropped
+  bool infeasible = false;               ///< the LP with cuts was infeasible
+  std::string stopped_because;
+  std::vector<CutSeparatorSummary> separators;
+};
+
 /// Result of a MILP solve.
 ///
 /// status semantics (docs/MIP.md):
@@ -90,6 +113,8 @@ struct MipResult {
   /// has NO certificate.
   bool lp_infeasible_certified = false;
   std::vector<double> lp_farkas;
+
+  CutSummary cuts;
 
   std::string message;
   /// Presolve statistics, for the report.

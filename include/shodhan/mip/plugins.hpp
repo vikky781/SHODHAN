@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "shodhan/mip/node_tree.hpp"
+#include "shodhan/mip/cuts.hpp"
 #include "shodhan/mip/search_state.hpp"
 
 namespace shodhan::mip {
@@ -69,23 +70,6 @@ class PrimalHeuristic {
   virtual bool wants(const MipOptions& options, HeuristicWhen when, long long nodes_processed, Index depth) const = 0;
   /// BeforeRootLp: state.lp is empty (no LP yet). Otherwise state.lp is the LP solution of the node.
   virtual void run(SearchState& state, HeuristicWhen when) = 0;
-};
-
-// ---------------------------------------------------------------------------------------------------------
-// Separator: interface only (implementations come with the cutting planes of a later step). A separator
-// looks at a fractional LP solution and returns inequalities that cut it off.
-struct CutRow {
-  std::vector<Index> index;
-  std::vector<double> value;
-  double lower = -kInf, upper = kInf;
-};
-
-class Separator {
- public:
-  virtual ~Separator() = default;
-  virtual const char* name() const = 0;
-  /// Appends violated inequalities valid for all integer feasible points; returns how many were added.
-  virtual int separate(SearchState& state, std::vector<CutRow>& cuts) = 0;
 };
 
 // ---------------------------------------------------------------------------------------------------------
