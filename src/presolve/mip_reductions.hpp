@@ -24,6 +24,10 @@ struct MipWork {
 /// probing. Returns true when the model changed (or infeasibility was found, see c.infeasible).
 bool run_mip_round(Context& c, MipWork& mw);
 
+/// Probing only (no other reduction): implications go to mw.implications, bound tightenings found by probing are
+/// written into the work model. Returns true on a change.
+bool run_probing(Context& c, MipWork& mw);
+
 /// Cliques (from rows) and implications of the final model, restricted to alive, untainted binary columns.
 /// Indices are ORIGINAL column indices; the caller maps them to the reduced model.
 MipPresolveInfo collect_mip_structure(Context& c, const MipWork& mw);

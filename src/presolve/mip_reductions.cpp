@@ -576,6 +576,14 @@ bool run_mip_round(Context& c, MipWork& mw) {
   return changed;
 }
 
+bool run_probing(Context& c, MipWork& mw) {
+  if (mw.tainted.empty()) mw.tainted.assign(u(c.w.n), 0);
+  c.w.compact();
+  bool any = false;
+  if (probe(c, mw, any)) return true;
+  return any;
+}
+
 MipPresolveInfo collect_mip_structure(Context& c, const MipWork& mw) {
   WorkModel& w = c.w;
   const PresolveOptions& o = c.opt;

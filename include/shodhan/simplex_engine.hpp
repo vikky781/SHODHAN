@@ -189,6 +189,12 @@ class SimplexEngine {
   /// changes nothing if any listed row is tight (nonbasic logical) or out of range. Row indices above a removed
   /// row shift down; `rows` need not be sorted.
   bool remove_rows(const std::vector<Index>& rows);
+  /// Row `pos` of the tableau for the basic variable at basis position `pos`: x_B[pos] + sum_j alpha[j] x_j = 0 over
+  /// the nonbasic variables j of the computational form (structural 0..n-1, logical n..n+m-1); alpha has N entries,
+  /// zero for basic variables. Needs a valid factorization (rebuilt if stale).
+  void tableau_row(Index pos, std::vector<double>& alpha);
+  /// Row-wise copy of the model including appended rows.
+  const CsrMatrix& row_csr() const { return csr_; }
   /// The model including appended rows.
   const LpModel& current_model() const { return *mp_; }
 

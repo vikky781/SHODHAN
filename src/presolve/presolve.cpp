@@ -257,6 +257,21 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
   return finish(all_gone ? PresolveStatus::SolvedByPresolve : PresolveStatus::Reduced);
 }
 
+MipPresolveInfo find_mip_structure(const LpModel& model, const PresolveOptions& options) {
+  const std::vector<std::string> problems = model.validate();
+  if (!problems.empty()) throw std::invalid_argument("find_mip_structure: invalid model: " + problems.front());
+  PostsolveStack stack;
+  PresolveStats stats;
+  WorkModel w(model);
+  Context ctx{w, options, stack, stats};
+  presolve_detail::MipWork mw;
+  if (options.probing) {
+    presolve_detail::run_probing(ctx, mw);
+    if (ctx.infeasible) return {};
+  }
+  return presolve_detail::collect_mip_structure(ctx, mw);
+}
+
 Solution postsolve(const PostsolveStack& st, const Solution& reduced) {
   const std::size_t nr = st.row_map.size();
   const std::size_t nc = st.col_map.size();

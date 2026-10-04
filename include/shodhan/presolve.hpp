@@ -165,6 +165,12 @@ struct PresolveResult {
 /// Deterministic LP/MIP presolve. See docs/PRESOLVE.md.
 PresolveResult presolve(const LpModel& model, const PresolveOptions& options = {});
 
+/// Cliques and implications of `model` itself (no reduction is applied, indices are the model's own): bound
+/// propagation, probing on binary columns and the clique table of the rows. Every statement holds for every
+/// integer-feasible point of `model`. Used by the cut separators when presolve is off. Empty when probing finds
+/// the model infeasible.
+MipPresolveInfo find_mip_structure(const LpModel& model, const PresolveOptions& options = {});
+
 /// Maps a solution of `stack`'s reduced model back to the original model:
 /// primal x, row duals y, reduced costs d (when the stack was built with
 /// duals and `reduced` carries them) and the objective in the original sense.

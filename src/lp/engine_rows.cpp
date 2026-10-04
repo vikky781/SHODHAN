@@ -96,6 +96,25 @@ void SimplexEngine::add_rows(const std::vector<RowSpec>& rows) {
   compute_dual();
 }
 
+void SimplexEngine::tableau_row(Index pos, std::vector<double>& alpha) {
+  if (pos < 0 || pos >= m_) throw std::invalid_argument("SimplexEngine::tableau_row: position out of range");
+  if (!factor_valid_) refactor();
+  rho_.clear();
+  rho_.set(pos, 1.0);
+  factor_.btran(rho_);
+  alpha.assign(to_size(N_), 0.0);
+  for (const Index i : rho_.indices()) {
+    const double v = rho_[i];
+    if (v == 0.0) continue;
+    for (Index t = csr_.row_start[to_size(i)]; t < csr_.row_start[to_size(i) + 1]; ++t) {
+      const Index j = csr_.col_index[to_size(t)];
+      if (status_[to_size(j)] != VarStatus::Basic) alpha[to_size(j)] += v * csr_.value[to_size(t)];
+    }
+    const Index jl = n_ + i;
+    if (status_[to_size(jl)] != VarStatus::Basic) alpha[to_size(jl)] -= v;
+  }
+}
+
 bool SimplexEngine::remove_rows(const std::vector<Index>& rows) {
   if (rows.empty()) return true;
   std::vector<char> del(to_size(m_), 0);
