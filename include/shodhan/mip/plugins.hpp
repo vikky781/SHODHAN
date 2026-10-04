@@ -43,6 +43,9 @@ struct BranchDecision {
   std::vector<BoundChange> tightenings;
   /// Estimated objective increases of the two children (0 when unknown); used for the node estimate.
   double down_gain = 0.0, up_gain = 0.0;
+  /// Valid lower bounds (minimization form, presolved units) of the two children when the rule solved their
+  /// LPs to optimality (strong branching); -kInf when unknown.
+  double down_bound = -kInf, up_bound = -kInf;
 };
 
 class BranchingRule {

@@ -71,6 +71,8 @@ struct SearchState {
   std::function<long long()> lp_iterations;
   /// Adds iterations spent by a plugin (strong branching, diving) to the totals.
   std::function<void(long long, bool strong)> add_iterations;
+  /// Counts one strong-branching child solve.
+  std::function<void()> count_strong_solve;
 
   double obj_scale = 1.0;  ///< the engine's objective is obj_scale times the presolved objective
   bool has_incumbent() const { return cutoff && cutoff() < kInf; }

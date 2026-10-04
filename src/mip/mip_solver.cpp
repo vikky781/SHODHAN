@@ -244,6 +244,7 @@ SearchState Search::make_state() {
   s.cutoff = [this]() { return incumbent_min(); };
   s.time_up = [this]() { return time_up(); };
   s.lp_iterations = [this]() { return engine_->stats().iterations + extra_lp_iterations_; };
+  s.count_strong_solve = [this]() { ++strong_calls_; };
   s.add_iterations = [this](long long n, bool strong) {
     if (strong) strong_iterations_ += n;
     else extra_lp_iterations_ += n;
@@ -467,7 +468,9 @@ NodeId Search::process(NodeId id, bool plunged) {
     }
     // Heuristics may have changed nothing in the engine (they work on copies); the LP solution stands.
     SearchState state = make_state();
+    const Clock::time_point t_rule = Clock::now();
     const BranchDecision dec = rule_->select(state);
+    t_strong_ += seconds_since(t_rule);
     if (dec.kind == BranchDecision::Kind::Prune) {
       ++pruned_bound_;
       return kNoNode;
@@ -500,11 +503,11 @@ NodeId Search::process(NodeId id, bool plunged) {
     const double lo_j = tlo_[to_size(j)], hi_j = thi_[to_size(j)];
     NodeId down = kNoNode, up = kNoNode;
     if (fl >= lo_j) {
-      down = tree_.add_child(id, j, -1, v, bound_child, est_down, BoundChange{j, lo_j, fl}, snap);
+      down = tree_.add_child(id, j, -1, v, std::max(bound_child, strengthen(dec.down_bound)), est_down, BoundChange{j, lo_j, fl}, snap);
       tree_.at(down).parent_objective = z;
     }
     if (ce <= hi_j) {
-      up = tree_.add_child(id, j, +1, v, bound_child, est_up, BoundChange{j, ce, hi_j}, snap);
+      up = tree_.add_child(id, j, +1, v, std::max(bound_child, strengthen(dec.up_bound)), est_up, BoundChange{j, ce, hi_j}, snap);
       tree_.at(up).parent_objective = z;
     }
     snap.reset();
