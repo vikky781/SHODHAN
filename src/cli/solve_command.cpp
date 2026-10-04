@@ -10,7 +10,9 @@
 
 #include "cert_output.hpp"
 #include "info.hpp"
+#include "solve_mip.hpp"
 #include "shodhan/lp_solver.hpp"
+#include "shodhan/mip/options.hpp"
 #include "shodhan/mps.hpp"
 #include "shodhan/rays.hpp"
 #include "shodhan/status.hpp"
@@ -27,7 +29,10 @@ constexpr int kExitStatus = 3;
 int usage_error(const std::string& message) {
   std::cerr << "error: " << message << "\n";
   std::cerr << "usage: shodhan solve <file> [--no-presolve] [--no-scaling] [--no-perturb] [--time-limit seconds]\n"
-               "                     [--iter-limit n] [--write-sol path] [--write-cert path] [--verbose]\n";
+               "                     [--iter-limit n] [--write-sol path] [--write-cert path] [--verbose]\n"
+               "                     MILP: [--mip-gap g] [--mip-abs-gap g] [--node-limit n] [--seed s]\n"
+               "                           [--branching reliability|pseudocost|mostfrac|first]\n"
+               "                           [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n";
   return kExitUsage;
 }
 
@@ -63,6 +68,8 @@ bool has_integer_columns(const LpModel& m) {
 int run_solve(const std::vector<std::string>& args) {
   std::string path, sol_path, cert_path;
   LpOptions opt;
+  mip::MipOptions mopt;
+  std::uint64_t seed = 0;
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
     if (a == "--no-presolve") {
@@ -85,6 +92,32 @@ int run_solve(const std::vector<std::string>& args) {
         opt.iteration_limit = static_cast<long long>(v);
       }
       ++i;
+    } else if (a == "--mip-gap" || a == "--mip-abs-gap" || a == "--node-limit" || a == "--seed") {
+      double v = 0.0;
+      if (i + 1 >= args.size() || !parse_number(args[i + 1], &v) || v < 0.0) return usage_error(a + " needs a non-negative number");
+      if (a == "--mip-gap") {
+        mopt.mip_gap = v;
+      } else if (a == "--mip-abs-gap") {
+        mopt.mip_abs_gap = v;
+      } else {
+        if (v != std::floor(v)) return usage_error(a + " needs an integer");
+        if (a == "--node-limit") mopt.node_limit = static_cast<long long>(v);
+        else seed = static_cast<std::uint64_t>(v);
+      }
+      ++i;
+    } else if (a == "--branching" || a == "--node-select" || a == "--heuristics") {
+      if (i + 1 >= args.size()) return usage_error(a + " needs a value");
+      const std::string value = args[++i];
+      if (a == "--branching" && !mip::parse_branching(value, &mopt.branching)) {
+        return usage_error("unknown branching rule '" + value + "' (reliability, pseudocost, mostfrac, first)");
+      }
+      if (a == "--node-select" && !mip::parse_node_select(value, &mopt.node_select)) {
+        return usage_error("unknown node selection '" + value + "' (bestbound, depth, bestestimate)");
+      }
+      if (a == "--heuristics") {
+        if (value != "on" && value != "off") return usage_error("--heuristics needs on or off");
+        mopt.heuristics = value == "on";
+      }
     } else if (a == "--write-cert") {
       if (i + 1 >= args.size()) return usage_error("--write-cert needs a file name");
       cert_path = args[++i];
@@ -111,15 +144,28 @@ int run_solve(const std::vector<std::string>& args) {
   print_model_summary(model, read.warnings, std::cout);
   std::cout << "\n";
 
-  if (has_integer_columns(model)) {
-    std::cout << "Status: " << to_string(Status::NotImplemented)
-              << " (the model has integer columns; branch and bound is not implemented yet, no solution is produced)\n";
+  if (model.quadratic.nnz() > 0) {
+    std::cout << "Status: " << to_string(Status::NotImplemented) << " (quadratic objectives are not implemented yet, no solution is produced)\n";
     if (!cert_path.empty()) {
       LpResult none;  // no certificate exists for an unsolved model: write the honest "other" one
       none.status = Status::NotImplemented;
       if (!write_certificate_output(model, path, opt, none, cert_path)) return kExitUsage;
     }
     return kExitNotImplemented;
+  }
+
+  if (has_integer_columns(model)) {
+    mopt.params = opt.params;  // tolerances and time limit given on the command line
+    mopt.params.seed = seed;
+    mopt.presolve = opt.presolve;
+    mopt.scaling = opt.scaling;
+    if (opt.params.verbosity >= 2) {
+      mopt.params.verbosity = 1;
+      mopt.log = &std::cerr;
+    } else {
+      mopt.params.verbosity = 0;
+    }
+    return run_solve_mip(model, path, mopt, sol_path, cert_path);
   }
 
   if (opt.params.verbosity >= 2) opt.log = &std::cerr;

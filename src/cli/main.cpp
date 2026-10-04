@@ -35,16 +35,22 @@ void print_usage(std::ostream& out) {
       << "                             diagnostic, not a benchmark)\n"
       << "  shodhan solve <file> [--no-presolve] [--no-scaling] [--no-perturb] [--time-limit s]\n"
       << "                       [--iter-limit n] [--write-sol path] [--write-cert path] [--verbose]\n"
+      << "                       [--mip-gap g] [--mip-abs-gap g] [--node-limit n] [--seed s]\n"
+      << "                       [--branching reliability|pseudocost|mostfrac|first]\n"
+      << "                       [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n"
       << "                             solve an LP (presolve, scaling, dual simplex, KKT check on\n"
-      << "                             the original model); models with integer columns are\n"
-      << "                             reported as not implemented\n"
+      << "                             the original model) or a MILP (branch and bound with\n"
+      << "                             reliability branching and primal heuristics); quadratic\n"
+      << "                             objectives are reported as not implemented\n"
       << "  shodhan dump-model <file>  print a canonical text form of the parsed model (used to\n"
       << "                             compare readers)\n"
       << "  shodhan --help             show this help\n"
       << "  shodhan --version          show the version\n"
       << "\n"
       << "Exit codes: 0 ok (optimal for solve), 1 usage, read or write error, 2 not implemented,\n"
-      << "            3 solve ended infeasible, unbounded, at a limit, or numerically.\n";
+      << "            3 solve ended infeasible, unbounded or numerically (an LP at a limit too),\n"
+      << "            4 a MILP solve stopped at its time or node limit (the output says whether\n"
+      << "              an incumbent exists).\n";
 }
 
 // Reads the model; on failure prints the error and returns false.

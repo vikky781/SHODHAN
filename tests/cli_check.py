@@ -185,8 +185,39 @@ def main():
     check("solve --iter-limit 0 reports IterationLimit with exit code 3 or solves trivially",
           (rc == 3 and "IterationLimit" in out) or (rc == 0 and "Optimal" in out), repr((rc, out)))
     rc, out, _ = run(exe, "solve", mip)
-    check("solve on a model with integer columns exits 2 (not implemented) after printing the summary",
-          rc == 2 and "Rows:" in out and "NotImplemented" in out and "integer columns" in out, repr((rc, out)))
+    check("solve on a MILP solves it: Optimal, objective 0.2, a best bound, exit 0",
+          rc == 0 and "Status:        Optimal" in out and "Objective:     0.2" in out and "Best bound:" in out and "Nodes:" in out, repr((rc, out[-300:])))
+    gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bench", "gen_mip.py")
+    with tempfile.TemporaryDirectory() as md:
+        knap = os.path.join(md, "knap.mps")
+        par = os.path.join(md, "parity.mps")
+        subprocess.run([sys.executable, gen, "knapsack", "30", "3", "11", knap], check=True)
+        subprocess.run([sys.executable, gen, "parity", "5", "3", par], check=True)
+        cert = os.path.join(md, "k.cert.json")
+        rc, out, _ = run(exe, "solve", knap, "--seed", "1", "--write-cert", cert)
+        check("solve on a knapsack MILP is optimal and writes a feasible certificate with the KASAUTI command",
+              rc == 0 and "Status:        Optimal" in out and "Objective:     -687" in out and "Certificate:   feasible written to" in out and "python -m kasauti" in out
+              and os.path.exists(cert), repr((rc, out[-400:])))
+        with open(cert) as f:
+            text = f.read()
+        check("the MILP certificate says optimality is not certified", '"optimality_certified": false' in text.replace(":false", ": false") or '"optimality_certified":false' in text, text[:200])
+        rc, out, _ = run(exe, "solve", knap, "--seed", "1", "--node-limit", "5")
+        check("solve --node-limit 5 stops with NodeLimit, says whether an incumbent exists, exit 4",
+              rc == 4 and "Status:        NodeLimit" in out and ("an incumbent exists" in out or "no incumbent was found" in out), repr((rc, out[-300:])))
+        rc, out, _ = run(exe, "solve", knap, "--seed", "1", "--time-limit", "0")
+        check("solve --time-limit 0 on a MILP exits 4 (time limit)", rc == 4 and "TimeLimit" in out, repr((rc, out[-300:])))
+        pcert = os.path.join(md, "p.cert.json")
+        rc, out, _ = run(exe, "solve", par, "--write-cert", pcert)
+        check("solve on an infeasible MILP exits 3 and says no certificate exists",
+              rc == 3 and "Status:        Infeasible" in out and "no certificate" in out, repr((rc, out[-300:])))
+        rc, out, _ = run(exe, "solve", knap, "--branching", "mostfrac", "--node-select", "depth", "--heuristics", "off", "--mip-gap", "0", "--mip-abs-gap", "0")
+        check("solve accepts --branching, --node-select, --heuristics and the gap options", rc == 0 and "Objective:     -687" in out, repr((rc, out[-300:])))
+        rc, _, err = run(exe, "solve", knap, "--branching", "nope")
+        check("solve with an unknown branching rule is a usage error (1)", rc == 1 and "unknown branching rule" in err, err)
+        rc, _, err = run(exe, "solve", knap, "--node-select", "nope")
+        check("solve with an unknown node selection is a usage error (1)", rc == 1 and "unknown node selection" in err, err)
+        rc, _, err = run(exe, "solve", knap, "--heuristics", "maybe")
+        check("solve --heuristics maybe is a usage error (1)", rc == 1, err)
     rc, _, err = run(exe, "solve")
     check("solve without file is a usage error (1)", rc == 1, err)
     rc, _, err = run(exe, "solve", lp, "--time-limit")
