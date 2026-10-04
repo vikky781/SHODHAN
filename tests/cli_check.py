@@ -180,10 +180,10 @@ def main():
         rc, out, _ = run(exe, "solve", lp, *flags)
         check("solve " + " ".join(flags) + " gives the same objective", rc == 0 and "Objective:     94" in out, repr((rc, out[-200:])))
     rc, out, _ = run(exe, "solve", lp, "--time-limit", "0", "--no-presolve")
-    check("solve --time-limit 0 reports TimeLimit with exit code 3", rc == 3 and "Status:        TimeLimit" in out, repr((rc, out)))
+    check("solve --time-limit 0 reports TimeLimit with exit code 4", rc == 4 and "Status:        TimeLimit" in out, repr((rc, out)))
     rc, out, _ = run(exe, "solve", lp, "--iter-limit", "0", "--no-presolve")
-    check("solve --iter-limit 0 reports IterationLimit with exit code 3 or solves trivially",
-          (rc == 3 and "IterationLimit" in out) or (rc == 0 and "Optimal" in out), repr((rc, out)))
+    check("solve --iter-limit 0 reports IterationLimit with exit code 4 or solves trivially",
+          (rc == 4 and "IterationLimit" in out) or (rc == 0 and "Optimal" in out), repr((rc, out)))
     rc, out, _ = run(exe, "solve", mip)
     check("solve on a MILP solves it: Optimal, objective 0.2, a best bound, exit 0",
           rc == 0 and "Status:        Optimal" in out and "Objective:     0.2" in out and "Best bound:" in out and "Nodes:" in out, repr((rc, out[-300:])))

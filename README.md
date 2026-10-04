@@ -88,7 +88,7 @@ columns substituted for any rank deficiency), factorizes it, prints the sizes, f
 Forrest-Tomlin run. It is a developer diagnostic, not a benchmark, and says nothing about solver performance.
 
 Exit codes: 0 ok (optimal for `solve`, for a MILP within the gap), 1 usage, read or write error, 2 not implemented, 3
-`solve` ended infeasible, unbounded or numerically (an LP at a limit too), 4 a MILP stopped at its time or node limit (the
+`solve` ended infeasible, unbounded or numerically, 4 `solve` stopped at a time, iteration or node limit (for a MILP the
 output says whether an incumbent exists). `solve` reports `Optimal` only after the KKT check on the
 original model passed, and `Infeasible`/`Unbounded` only with a verified certificate.
 

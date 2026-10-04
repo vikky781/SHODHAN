@@ -25,6 +25,7 @@ constexpr int kExitOk = 0;
 constexpr int kExitUsage = 1;
 constexpr int kExitNotImplemented = 2;
 constexpr int kExitStatus = 3;
+constexpr int kExitLimit = 4;
 
 int usage_error(const std::string& message) {
   std::cerr << "error: " << message << "\n";
@@ -234,7 +235,9 @@ int run_solve(const std::vector<std::string>& args) {
     }
   }
   if (!cert_path.empty() && !write_certificate_output(model, path, opt, r, cert_path)) return kExitUsage;
-  return r.status == Status::Optimal ? kExitOk : kExitStatus;
+  if (r.status == Status::Optimal) return kExitOk;
+  // A run stopped at a limit (time or iterations) exits 4, like a MILP stopped at its time or node limit.
+  return r.status == Status::TimeLimit || r.status == Status::IterationLimit ? kExitLimit : kExitStatus;
 }
 
 }  // namespace shodhan::cli

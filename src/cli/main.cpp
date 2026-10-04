@@ -48,9 +48,9 @@ void print_usage(std::ostream& out) {
       << "  shodhan --version          show the version\n"
       << "\n"
       << "Exit codes: 0 ok (optimal for solve), 1 usage, read or write error, 2 not implemented,\n"
-      << "            3 solve ended infeasible, unbounded or numerically (an LP at a limit too),\n"
-      << "            4 a MILP solve stopped at its time or node limit (the output says whether\n"
-      << "              an incumbent exists).\n";
+      << "            3 solve ended infeasible, unbounded or numerically,\n"
+      << "            4 solve stopped at a time, iteration or node limit (for a MILP the output says\n"
+      << "              whether an incumbent exists).\n";
 }
 
 // Reads the model; on failure prints the error and returns false.
