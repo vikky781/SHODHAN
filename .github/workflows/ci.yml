@@ -57,6 +57,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
+          set +e +o pipefail
           {
             echo "--- compiler errors (first 40) ---"
             grep -E "error|Error|FAILED" build.log 2>/dev/null | head -40
