@@ -76,6 +76,15 @@ struct SimplexOptions {
   FactorParams factor;
 };
 
+/// Compact record of a basis: the VarStatus of each of the N = n + m variables, one byte each. Restoring it
+/// reproduces the basis and the bound each nonbasic variable sits at; the factorization and the primal and
+/// dual values are recomputed (so they agree with a cold solve up to rounding, not bit for bit).
+struct BasisSnapshot {
+  std::vector<std::uint8_t> status;
+  bool empty() const { return status.empty(); }
+  friend bool operator==(const BasisSnapshot&, const BasisSnapshot&) = default;
+};
+
 struct SimplexStats {
   long long iterations = 0;        ///< all simplex iterations
   long long dual_iterations = 0;
@@ -119,6 +128,24 @@ class SimplexEngine {
   EngineStatus solve();
 
   // ---- warm start ------------------------------------------------------
+  /// Solves like solve() but stops with IterationLimit after at most `max_iterations` further iterations.
+  EngineStatus solve_limited(long long max_iterations);
+  /// The basis as a snapshot (one byte per variable).
+  BasisSnapshot get_basis_snapshot() const;
+  /// Restores a snapshot taken from an engine on the same model (any bounds): the basic variables and the
+  /// nonbasic ones are set from the snapshot, a nonbasic status that its variable's CURRENT bounds do not
+  /// allow is replaced by the nearest allowed one, and the basis is refactorized. Returns false if the
+  /// snapshot does not have exactly m basic variables or the factorization is unusable.
+  bool set_basis(const BasisSnapshot& snapshot);
+  /// Current bounds of a structural column / of the logical variable of a row (the row bounds).
+  double col_lower(Index j) const { return lo_[to_size(j)]; }
+  double col_upper(Index j) const { return hi_[to_size(j)]; }
+  double row_lower(Index i) const { return lo_[to_size(n_ + i)]; }
+  double row_upper(Index i) const { return hi_[to_size(n_ + i)]; }
+  /// c_work^T x + offset of the current (possibly primal infeasible) basic solution. When the basis is dual
+  /// feasible and the costs are unmodified this is the dual objective, a valid lower bound on the LP optimum
+  /// (minimization form), also after an IterationLimit.
+  double current_dual_objective() const { return working_objective(); }
   /// Changes the bounds of a structural column. A nonbasic variable moves to
   /// its new bound (the primal values are updated through one ftran at the next
   /// solve); a basic one just gets new bounds.

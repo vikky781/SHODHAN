@@ -290,6 +290,14 @@ EngineStatus SimplexEngine::accept(EngineStatus st) {
   return st;
 }
 
+EngineStatus SimplexEngine::solve_limited(long long max_iterations) {
+  const long long saved = opt_.iteration_limit;
+  opt_.iteration_limit = std::min(saved, stats_.iterations + std::max(max_iterations, 0LL));
+  const EngineStatus st = solve();
+  opt_.iteration_limit = saved;
+  return st;
+}
+
 EngineStatus SimplexEngine::solve() {
   t0_ = std::chrono::steady_clock::now();
   cost_ = cost_orig_;

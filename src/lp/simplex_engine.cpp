@@ -146,6 +146,46 @@ bool SimplexEngine::set_basis(const std::vector<Index>& basis) {
   return ok;
 }
 
+BasisSnapshot SimplexEngine::get_basis_snapshot() const {
+  BasisSnapshot s;
+  s.status.resize(to_size(N_));
+  for (Index j = 0; j < N_; ++j) s.status[to_size(j)] = static_cast<std::uint8_t>(status_[to_size(j)]);
+  return s;
+}
+
+bool SimplexEngine::set_basis(const BasisSnapshot& snapshot) {
+  if (snapshot.status.size() != to_size(N_)) return false;
+  std::vector<Index> basic;
+  basic.reserve(to_size(m_));
+  for (Index j = 0; j < N_; ++j) {
+    if (snapshot.status[to_size(j)] == static_cast<std::uint8_t>(VarStatus::Basic)) basic.push_back(j);
+  }
+  if (basic.size() != to_size(m_)) return false;
+  basis_ = basic;
+  std::fill(pos_.begin(), pos_.end(), -1);
+  for (Index p = 0; p < m_; ++p) pos_[to_size(basic[to_size(p)])] = p;
+  for (Index j = 0; j < N_; ++j) {
+    if (pos_[to_size(j)] >= 0) {
+      status_[to_size(j)] = VarStatus::Basic;
+      continue;
+    }
+    // The recorded side if the current bounds allow it, else the nearest allowed status.
+    const bool prefer_upper = snapshot.status[to_size(j)] == static_cast<std::uint8_t>(VarStatus::AtUpper);
+    set_status_from_bounds(j, prefer_upper);
+  }
+  sync_nonbasic_values();
+  cost_ = cost_orig_;
+  costs_modified_ = false;
+  const int repairs_before = stats_.basis_repairs;
+  const bool ok = refactor(true);
+  if (ok) {
+    compute_primal();
+    compute_dual();
+    if (stats_.basis_repairs == repairs_before) compute_exact_weights();
+  }
+  return ok;
+}
+
 bool SimplexEngine::refactor(bool reset_weights) {
   FactorStatus st = factor_.factorize(model_.A, basis_);
   bool repaired = false;
