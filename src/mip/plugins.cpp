@@ -2,9 +2,15 @@
 
 namespace shodhan::mip {
 
+void register_selectors(PluginRegistry&);
+void register_branching_simple(PluginRegistry&);
+
 namespace {
 
-void register_builtin(PluginRegistry&) {}
+void register_builtin(PluginRegistry& reg) {
+  register_selectors(reg);
+  register_branching_simple(reg);
+}
 
 }  // namespace
 

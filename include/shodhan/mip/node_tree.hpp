@@ -33,7 +33,8 @@ struct Node {
   Index branch_col = -1;     ///< -1 for the root
   int branch_dir = 0;        ///< -1 down branch (upper bound lowered), +1 up branch, 0 root
   double branch_value = 0.0; ///< the fractional LP value of branch_col at the parent
-  double lower_bound = 0.0;  ///< the parent's LP objective (minimization form of the presolved model)
+  double lower_bound = 0.0;  ///< the parent's LP objective, strengthened by the objective granularity (minimization form)
+  double parent_objective = 0.0;  ///< the parent's raw LP objective (pseudocost updates)
   double estimate = 0.0;     ///< estimated objective of the best integer solution below (best-estimate selection)
   std::vector<BoundChange> local;
   /// Basis of the parent's LP optimum, shared by both children; released once used or when the memory cap is hit.
