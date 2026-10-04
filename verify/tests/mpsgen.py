@@ -166,3 +166,95 @@ def generate(seed):
                 lines.append("  %s BND %s%s" % (bt, name, (" " + val) if needs_value else ""))
     lines.append("ENDATA")
     return "\n".join(lines) + "\n", ", ".join(desc + (["fixed"] if fixed else ["free"]))
+
+
+def generate_qp(seed):
+    """A random quadratic-objective MPS text (free or fixed format, QUADOBJ in either triangle or QMATRIX), about one
+    in six of them deliberately invalid (duplicate pair, asymmetric QMATRIX, unknown column, quadratic constraints).
+    Returns (text, description)."""
+    rnd = random.Random(1000003 * seed + 17)
+    fixed = rnd.random() < 0.4
+    numbers = SHORT if fixed else ALL_NUMBERS
+    nonzero = [n for n in numbers if float(n.replace("D", "e").replace("d", "e")) != 0]
+    n_rows = rnd.randint(1, 4)
+    n_cols = rnd.randint(2, 7)
+    cname = ["COL %d" % (j + 1) if fixed and rnd.random() < 0.4 else "C%d" % (j + 1) for j in range(n_cols)]
+    rname = ["R%d" % (i + 1) for i in range(n_rows)]
+    kind = rnd.choice(["QUADOBJ", "QUADOBJ", "QMATRIX"])
+    order = rnd.choice(["lower", "upper", "mixed"])
+    lines = ["NAME          QP%d" % seed]
+    desc = [kind, order]
+    if rnd.random() < 0.3:
+        lines += ["OBJSENSE", "    MAX"]
+        desc.append("max")
+
+    def dline(f2, f3, v3, f5="", v5=""):
+        if fixed:
+            return fixed_line("", f2, f3, v3, f5, v5).rstrip()
+        parts = ["   ", f2, f3, v3] + ([f5, v5] if f5 else [])
+        return " ".join(parts)
+
+    lines.append("ROWS")
+    lines.append(" N  OBJ")
+    for i in range(n_rows):
+        lines.append(" %s  %s" % (rnd.choice("LGE"), rname[i]))
+    lines.append("COLUMNS")
+    for j in range(n_cols):
+        lines.append(dline(cname[j], "OBJ", rnd.choice(numbers)))
+        for i in range(n_rows):
+            if rnd.random() < 0.6:
+                lines.append(dline(cname[j], rname[i], rnd.choice(nonzero)))
+    lines.append("RHS")
+    lines.append(dline("RHS", "OBJ", rnd.choice(numbers)))
+    for i in range(n_rows):
+        lines.append(dline("RHS", rname[i], rnd.choice(numbers)))
+    if rnd.random() < 0.7:
+        lines.append("BOUNDS")
+        for j in range(n_cols):
+            if rnd.random() < 0.5:
+                lines.append(dline_bound(fixed, "UP", cname[j], rnd.choice(nonzero)))
+    fault = rnd.choice(["none"] * 5 + ["duplicate", "asymmetric", "unknown", "qcmatrix"])
+    desc.append("fault " + fault)
+    pairs = [(i, j) for j in range(n_cols) for i in range(j, n_cols) if rnd.random() < 0.5]
+    if not pairs:
+        pairs = [(0, 0)]
+    values = {p: rnd.choice(nonzero) for p in pairs}
+    entries = []
+    for (i, j), v in values.items():
+        if kind == "QUADOBJ":
+            if order == "lower" or (order == "mixed" and rnd.random() < 0.5):
+                entries.append((i, j, v))
+            else:
+                entries.append((j, i, v))
+        else:
+            entries.append((i, j, v))
+            if i != j:
+                mirror = v
+                if fault == "asymmetric":
+                    mirror = "17" if v != "17" else "18"
+                    fault = "done"
+                entries.append((j, i, mirror))
+    if fault == "duplicate" and kind == "QUADOBJ":
+        i, j, v = entries[0]
+        entries.append((j, i, v))
+    elif fault == "duplicate":
+        entries.append(entries[0])
+    elif fault == "unknown":
+        entries.append((0, "NOPE", "1"))
+    if fault == "qcmatrix":
+        lines.append("QCMATRIX R1")
+        lines.append(dline(cname[0], cname[0], "1"))
+    else:
+        lines.append(kind)
+        rnd.shuffle(entries)
+        for i, j, v in entries:
+            second = j if isinstance(j, str) else cname[j]
+            lines.append(dline(cname[i], second, v))
+    lines.append("ENDATA")
+    return "\n".join(lines) + "\n", ", ".join(desc + (["fixed"] if fixed else ["free"]))
+
+
+def dline_bound(fixed, typ, col, value):
+    if fixed:
+        return " " + typ.ljust(2) + " " + "BND".ljust(8) + "  " + col.ljust(8) + "  " + value.rjust(12)
+    return " %s BND %s %s" % (typ, col, value)

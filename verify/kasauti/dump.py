@@ -30,6 +30,10 @@ def dump_model(model):
     for j in range(model.n_cols):
         for i, v in sorted(model.col_entries[j]):
             lines.append("entry\t%s\t%s\t%s" % (model.row_names[i], model.col_names[j], repr(float(v))))
+    if getattr(model, "quad", None):
+        lines.append("qnnz\t%d" % len(model.quad))
+        for (i, j), v in sorted(model.quad.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+            lines.append("quad\t%s\t%s\t%s" % (model.col_names[i], model.col_names[j], repr(float(v))))
     return "\n".join(lines) + "\n"
 
 
@@ -41,7 +45,7 @@ def _value(text):
     return float(text)
 
 
-_NUMERIC_FIELDS = {"offset": (1,), "row": (2, 3), "col": (2, 3, 4), "entry": (3,)}
+_NUMERIC_FIELDS = {"offset": (1,), "row": (2, 3), "col": (2, 3, 4), "entry": (3,), "quad": (3,)}
 
 
 def compare_dumps(a, b, row_scale=None):

@@ -4,7 +4,8 @@ Written from the conventions in docs/MPS_FORMAT.md and docs/CONVENTIONS.md, not 
 Numbers are parsed from their decimal text as exact fractions (``exact=True``) or as floats.
 
 Infinite bounds are represented by ``None``: ``lo is None`` means -inf, ``hi is None`` means +inf.
-Features that are not supported (semi-continuous bounds, quadratic sections, SOS, indicators) raise
+A quadratic OBJECTIVE is read from QUADOBJ or QMATRIX (docs/QP.md); quadratic constraints (QCMATRIX, QSECTION), semi-continuous
+bounds, SOS and indicators raise
 ``Unsupported``; malformed input raises ``MpsError``. Nothing is guessed.
 """
 
@@ -17,7 +18,8 @@ INF_LIMIT = Fraction(10) ** 30
 MAX_EXPONENT = 10000
 
 _NUMBER = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?$")
-_UNSUPPORTED_SECTIONS = {"QUADOBJ", "QMATRIX", "QSECTION", "QCMATRIX", "SOS", "INDICATORS", "OBJNAME", "QCMATRIX"}
+_UNSUPPORTED_SECTIONS = {"QSECTION", "QCMATRIX", "SOS", "INDICATORS", "OBJNAME"}
+_QUAD_SECTIONS = ("QUADOBJ", "QMATRIX")
 _VALUE_BOUNDS = {"UP", "LO", "FX", "LI", "UI", "SC"}
 _NO_VALUE_BOUNDS = {"FR", "MI", "PL", "BV"}
 
@@ -77,6 +79,8 @@ class Model:
         self.row_index = {}
         self.col_index = {}
         self.warnings = []
+        self.quad = {}               # lower triangle of Q: (i, j) with i >= j (column indices) -> value
+        self.quad_kind = None        # "QUADOBJ" or "QMATRIX"
 
     @property
     def n_rows(self):
@@ -85,6 +89,10 @@ class Model:
     @property
     def n_cols(self):
         return len(self.col_names)
+
+    @property
+    def n_quad(self):
+        return len(self.quad)
 
     @property
     def nnz(self):
@@ -148,8 +156,8 @@ def _layout_ok(section, line):
     f = _fixed_fields(line.raw)
     if f is None:
         return False
-    if section in ("COLUMNS", "RHS", "RANGES"):
-        if not f[1] and section == "COLUMNS":
+    if section in ("COLUMNS", "RHS", "RANGES") or section in _QUAD_SECTIONS:
+        if not f[1] and (section == "COLUMNS" or section in _QUAD_SECTIONS):
             return False
         if not f[2] or not f[3] or not _is_number_text(f[3]):
             return False
@@ -185,12 +193,12 @@ def parse_mps(data, exact=True):
         raw = line.raw
         first_col_text = raw[0] not in " \t"
         tokens = raw.split()
-        is_header = first_col_text and (len(tokens) == 1 or tokens[0].upper() in ("NAME", "OBJSENSE"))
+        is_header = first_col_text and (len(tokens) == 1 or tokens[0].upper() in ("NAME", "OBJSENSE", "QCMATRIX", "QSECTION"))
         if is_header:
             kw = tokens[0].upper()
             if kw in _UNSUPPORTED_SECTIONS:
-                raise Unsupported("line %d: section %s is not supported" % (line.no, kw))
-            if kw not in ("NAME", "OBJSENSE", "ROWS", "COLUMNS", "RHS", "RANGES", "BOUNDS", "ENDATA"):
+                raise Unsupported("line %d: quadratic constraints not supported / section %s is not supported" % (line.no, kw))
+            if kw not in ("NAME", "OBJSENSE", "ROWS", "COLUMNS", "RHS", "RANGES", "BOUNDS", "ENDATA") + _QUAD_SECTIONS:
                 raise MpsError("line %d: unknown section %r" % (line.no, tokens[0]))
             sections.append((kw, line, []))
             if kw == "ENDATA":
@@ -206,7 +214,7 @@ def parse_mps(data, exact=True):
     # ---- fixed or free format ------------------------------------------------------------
     layout_lines = []
     for kw, _, data_lines in sections:
-        if kw in ("ROWS", "COLUMNS", "RHS", "RANGES", "BOUNDS"):
+        if kw in ("ROWS", "COLUMNS", "RHS", "RANGES", "BOUNDS") + _QUAD_SECTIONS:
             for ln in data_lines:
                 if kw == "COLUMNS" and "MARKER" in ln.raw.split():
                     continue
@@ -464,6 +472,45 @@ def parse_mps(data, exact=True):
                     model.col_lo[j] = zero
                     model.col_hi[j] = 1 if exact else 1.0
                     model.col_integer[j] = True
+
+    # ---- the quadratic objective (docs/QP.md) -------------------------------------------------
+    quad_sections = [sec for sec in sections if sec[0] in _QUAD_SECTIONS]
+    if len(quad_sections) > 1:
+        raise MpsError("QUADOBJ and QMATRIX (or a repeated section) cannot both be given")
+    for kw, header, data_lines in quad_sections:
+        model.quad_kind = kw
+        listed = {}
+        for no, rec in records(kw, data_lines):
+            if fixed:
+                first = rec[1]
+                pairs = [(rec[2], rec[3])] + ([(rec[4], rec[5])] if rec[4] else [])
+            else:
+                if len(rec) not in (3, 5):
+                    raise MpsError("line %d: a %s line has 3 or 5 fields" % (no, kw))
+                first = rec[0]
+                pairs = [(rec[1], rec[2])] + ([(rec[3], rec[4])] if len(rec) == 5 else [])
+            for second, vtext in pairs:
+                if first not in model.col_index or second not in model.col_index:
+                    raise MpsError("line %d: unknown column in %s" % (no, kw))
+                a, b = model.col_index[first], model.col_index[second]
+                v = num(vtext)
+                if isinstance(v, float) and math.isinf(v):
+                    raise MpsError("line %d: infinite quadratic coefficient" % no)
+                key = (max(a, b), min(a, b)) if kw == "QUADOBJ" else (a, b)
+                if key in listed:
+                    raise MpsError("line %d: duplicate %s entry" % (no, kw))
+                listed[key] = v
+        for (a, b), v in listed.items():
+            if kw == "QMATRIX":
+                if (b, a) not in listed:
+                    raise MpsError("QMATRIX is not symmetric: entry (%s, %s) has no mirror entry" % (model.col_names[a], model.col_names[b]))
+                w = listed[(b, a)]
+                if a > b and abs(float(v) - float(w)) > 1e-12 * max(1.0, abs(float(v)), abs(float(w))):
+                    raise MpsError("QMATRIX is not symmetric: entries (%s, %s) differ" % (model.col_names[a], model.col_names[b]))
+                if a < b:
+                    continue
+            if v != 0:
+                model.quad[(a, b)] = v
 
     # ---- row bounds from the right-hand sides and ranges ----------------------------------
     zero = 0 if exact else 0.0

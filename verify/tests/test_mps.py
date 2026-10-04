@@ -235,9 +235,28 @@ ENDATA
         with self.assertRaises(Unsupported):
             parse(FREE.replace(" UP BND       X            4.0", " SC BND       X            4.0"))
         with self.assertRaises(Unsupported):
-            parse(FREE.replace("ENDATA", "QUADOBJ\n    X  X  2.0\nENDATA"))
+            parse(FREE.replace("ENDATA", "QCMATRIX R1\n    X  X  2.0\nENDATA"))
+        with self.assertRaises(Unsupported):
+            parse(FREE.replace("ENDATA", "QSECTION\n    X  X  2.0\nENDATA"))
         with self.assertRaises(Unsupported):
             parse(FREE.replace("ROWS", "SOS\nROWS", 1))
+
+    def test_quadratic_objective_sections(self):
+        # QUADOBJ: each unordered pair once, either triangle; a diagonal entry q_jj means (1/2) q_jj x_j^2.
+        lower = parse(FREE.replace("ENDATA", "QUADOBJ\n    X  X  2\n    Y  X  3\nENDATA"))
+        upper = parse(FREE.replace("ENDATA", "QUADOBJ\n    X  X  2\n    X  Y  3\nENDATA"))
+        self.assertEqual(lower.quad, upper.quad)
+        self.assertEqual(lower.quad, {(0, 0): 2, (1, 0): 3})
+        full = parse(FREE.replace("ENDATA", "QMATRIX\n    X  X  2\n    X  Y  3\n    Y  X  3\nENDATA"))
+        self.assertEqual(full.quad, lower.quad)
+        with self.assertRaises(MpsError):
+            parse(FREE.replace("ENDATA", "QUADOBJ\n    X  Y  3\n    Y  X  3\nENDATA"))
+        with self.assertRaises(MpsError):
+            parse(FREE.replace("ENDATA", "QMATRIX\n    X  Y  3\n    Y  X  4\nENDATA"))
+        with self.assertRaises(MpsError):
+            parse(FREE.replace("ENDATA", "QMATRIX\n    X  Y  3\nENDATA"))
+        with self.assertRaises(MpsError):
+            parse(FREE.replace("ENDATA", "QUADOBJ\n    X  NOPE  3\nENDATA"))
 
     def test_comments_and_blank_lines_and_crlf(self):
         text = "* a comment\r\n\r\n" + FREE.replace("\n", "\r\n").replace("ROWS", "* another\r\nROWS")
