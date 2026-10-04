@@ -341,11 +341,10 @@ TEST_CASE(mps_error_missing_endata) {
   expect_error("", {"missing ENDATA"});
 }
 
-TEST_CASE(mps_error_qps_sections_are_rejected_clearly) {
-  expect_error("NAME t\nROWS\n N OBJ\nCOLUMNS\n X OBJ 1\nQUADOBJ\n X X 2\nENDATA\n",
-               {"t.mps:6:", "QPS not yet supported", "QUADOBJ"});
-  expect_error("NAME t\nROWS\n N OBJ\nCOLUMNS\n X OBJ 1\nQMATRIX\nENDATA\n",
-               {"QPS not yet supported"});
+TEST_CASE(mps_error_quadratic_constraints_are_rejected_clearly) {
+  expect_error("NAME t\nROWS\n N OBJ\nCOLUMNS\n X OBJ 1\nQSECTION\n X X 2\nENDATA\n",
+               {"t.mps:6:", "quadratic constraints not supported", "QSECTION"});
+  expect_error("NAME t\nROWS\n N OBJ\nCOLUMNS\n X OBJ 1\nQCMATRIX R1\nENDATA\n", {"quadratic constraints not supported"});
 }
 
 TEST_CASE(mps_error_other_malformed_input) {

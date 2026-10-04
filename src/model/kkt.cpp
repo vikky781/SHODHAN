@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <limits>
 
+#include "shodhan/quadratic.hpp"
+
 namespace shodhan {
 
 namespace {
@@ -76,7 +78,20 @@ KktReport check_kkt(const LpModel& m, const Solution& s, double tol) {
   r.primal_infeasibility_abs = std::max(row_viol, col_viol);
   r.primal_infeasibility_rel = std::max(row_viol / (1.0 + row_norm), col_viol / (1.0 + col_norm));
 
-  // ---- reduced costs recomputed as c - A^T y (minimization form) ----
+  // ---- quadratic term: (Q x) in minimization form (a max model has Q negated like c) ----
+  std::vector<double> qx(cols, 0.0);
+  double quad_half = 0.0;  // (1/2) x^T Q x in minimization form
+  double qxmax = 0.0;
+  if (has_quadratic(m)) {
+    quad_multiply(m.quadratic, s.x, qx);
+    for (std::size_t j = 0; j < cols; ++j) {
+      qx[j] *= sgn;
+      quad_half += 0.5 * qx[j] * s.x[j];
+      qxmax = std::max(qxmax, std::fabs(qx[j]));
+    }
+  }
+
+  // ---- reduced costs recomputed as c + Q x - A^T y (minimization form) ----
   std::vector<double> aty(cols, 0.0);
   m.A.multiply_transpose(s.y, aty);
   std::vector<double> d(cols, 0.0);
@@ -85,15 +100,15 @@ KktReport check_kkt(const LpModel& m, const Solution& s, double tol) {
   // difference of huge terms can only be as accurate as those terms allow.
   std::vector<double> dscale(cols, 1.0);
   double cnorm = 0.0;
-  double primal_obj = sgn * m.objective_offset;
-  double primal_terms = std::fabs(m.objective_offset);
+  double primal_obj = sgn * m.objective_offset + quad_half;
+  double primal_terms = std::fabs(m.objective_offset) + std::fabs(quad_half);
   for (std::size_t j = 0; j < cols; ++j) {
     const double c = sgn * m.col_cost[j];
-    d[j] = c - aty[j];
+    d[j] = c + qx[j] - aty[j];
     cnorm = std::max(cnorm, std::fabs(c));
     primal_obj += c * s.x[j];
     primal_terms += std::fabs(c * s.x[j]);
-    double terms = 1.0 + std::fabs(c);
+    double terms = 1.0 + std::fabs(c) + std::fabs(qx[j]);
     for (Index p = m.A.col_start[j]; p < m.A.col_start[j + 1]; ++p) {
       terms += std::fabs(m.A.value[to_size(p)] * s.y[to_size(m.A.row_index[to_size(p)])]);
     }
@@ -110,8 +125,9 @@ KktReport check_kkt(const LpModel& m, const Solution& s, double tol) {
   }
 
   // ---- dual feasibility, complementarity, dual objective ----
-  double dual_obj = sgn * m.objective_offset;
-  double dual_terms = std::fabs(m.objective_offset);
+  // The dual objective of a convex QP is  sum y*(active row bound) + sum d*(active column bound) - (1/2) x^T Q x + offset.
+  double dual_obj = sgn * m.objective_offset - quad_half;
+  double dual_terms = std::fabs(m.objective_offset) + std::fabs(quad_half);
   double dual_viol = 0.0;
   double row_viol_dual = 0.0;
   double col_viol_rel = 0.0;
@@ -166,7 +182,7 @@ KktReport check_kkt(const LpModel& m, const Solution& s, double tol) {
   }
   r.dual_objective = dual_obj;
   r.dual_infeasibility_abs = dual_viol;
-  r.dual_infeasibility_rel = std::max(row_viol_dual / (1.0 + cnorm), col_viol_rel);
+  r.dual_infeasibility_rel = std::max(row_viol_dual / (1.0 + std::max(cnorm, qxmax)), col_viol_rel);
   r.complementarity_abs = comp;
   // The gap is a difference of sums whose terms may be far larger than the
   // sums themselves; scale by the larger of the sums and their absolute terms.

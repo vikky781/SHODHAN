@@ -22,6 +22,8 @@ const char* to_string(Status status) noexcept {
       return "NumericalError";
     case Status::Interrupted:
       return "Interrupted";
+    case Status::NonConvex:
+      return "NonConvex";
     case Status::NotImplemented:
       return "NotImplemented";
     case Status::ReadError:

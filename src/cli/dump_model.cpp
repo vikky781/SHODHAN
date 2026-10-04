@@ -39,6 +39,14 @@ void print_model_dump(const LpModel& m, std::ostream& out) {
       out << "entry\t" << row_name(m, m.A.row_index[to_size(t)]) << "\t" << col_name(m, j) << "\t" << num(m.A.value[to_size(t)]) << "\n";
     }
   }
+  if (m.quadratic.nnz() > 0) {
+    out << "qnnz\t" << m.quadratic.nnz() << "\n";
+    for (Index j = 0; j < m.n_cols; ++j) {
+      for (Index t = m.quadratic.col_start[to_size(j)]; t < m.quadratic.col_start[to_size(j) + 1]; ++t) {
+        out << "quad\t" << col_name(m, m.quadratic.row_index[to_size(t)]) << "\t" << col_name(m, j) << "\t" << num(m.quadratic.value[to_size(t)]) << "\n";
+      }
+    }
+  }
 }
 
 }  // namespace shodhan::cli

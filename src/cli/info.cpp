@@ -1,10 +1,13 @@
 #include "info.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <ostream>
 #include <string>
 
 #include "shodhan/model_stats.hpp"
+#include "shodhan/quadratic.hpp"
 #include "shodhan/scaling.hpp"
 
 namespace shodhan::cli {
@@ -58,6 +61,20 @@ void print_model_summary(const LpModel& model, const std::vector<std::string>& w
   out << "Bounds:         " << range_text(s.bound) << " (finite, nonzero)\n";
   if (model.objective_offset != 0.0) {
     out << "Objective offset: " << sci(model.objective_offset) << "\n";
+  }
+  if (has_quadratic(model)) {
+    Index diag = 0;
+    double qmax = 0.0;
+    for (Index j = 0; j < model.n_cols; ++j) {
+      for (Index p = model.quadratic.col_start[to_size(j)]; p < model.quadratic.col_start[to_size(j) + 1]; ++p) {
+        if (model.quadratic.row_index[to_size(p)] == j) ++diag;
+        qmax = std::max(qmax, std::fabs(model.quadratic.value[to_size(p)]));
+      }
+    }
+    out << "Quadratic term: " << model.quadratic.nnz() << " nonzeros in the lower triangle of Q (" << diag << " diagonal, "
+        << model.quadratic.nnz() - static_cast<std::size_t>(diag) << " off-diagonal), largest |q| " << sci(qmax) << "\n";
+    const ConvexityReport cr = check_convexity(model);
+    out << "Convexity:      " << (!cr.decided ? "not decided (" + cr.note + ")" : cr.convex ? "positive semidefinite (rank " + std::to_string(cr.rank) + ")" : "NOT convex: " + cr.note) << "\n";
   }
   if (!warnings.empty()) {
     out << "Warnings (" << warnings.size() << "):\n";

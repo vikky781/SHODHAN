@@ -272,6 +272,15 @@ bool write_mps(const LpModel& model, std::ostream& out, std::string* error) {
   }
   const std::string bounds_text = bounds.str();
   if (!bounds_text.empty()) os << "BOUNDS\n" << bounds_text;
+  if (model.quadratic.nnz() > 0) {
+    // QUADOBJ: the lower triangle of Q, each unordered pair once (docs/QP.md).
+    os << "QUADOBJ\n";
+    for (std::size_t j = 0; j < n; ++j) {
+      for (Index p = model.quadratic.col_start[j]; p < model.quadratic.col_start[j + 1]; ++p) {
+        os << entry(col_names[j], col_names[to_size(model.quadratic.row_index[to_size(p)])], model.quadratic.value[to_size(p)]);
+      }
+    }
+  }
   os << "ENDATA\n";
 
   if (number_too_wide) {

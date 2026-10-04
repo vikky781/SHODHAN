@@ -14,6 +14,7 @@ enum class Status {
   NumericalError,
   Interrupted,
   NotImplemented,
+  NonConvex,  ///< the quadratic term is not positive semidefinite (docs/QP.md)
   ReadError,
 };
 

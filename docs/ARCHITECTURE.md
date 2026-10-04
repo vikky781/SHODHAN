@@ -52,8 +52,8 @@ cli  ->  lp  ->  presolve, scaling, linalg  ->  model  ->  util
 - Everything is stored as `row_lower <= A x <= row_upper` and
   `col_lower <= x <= col_upper`. Infinity is stored as `+/-kInf` (1e30);
   `is_inf()` tests for it.
-- `LpModel::quadratic` is reserved for the lower triangle of Q and stays
-  empty until quadratic models are supported.
+- `LpModel::quadratic` holds the lower triangle of the symmetric Q of the objective
+  `offset + c^T x + (1/2) x^T Q x` (docs/CONVENTIONS.md, docs/QP.md); empty means LP.
 - Indices are 32-bit; a matrix may hold at most INT32_MAX nonzeros.
 
 ### Error handling

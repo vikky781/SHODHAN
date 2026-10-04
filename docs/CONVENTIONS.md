@@ -113,3 +113,30 @@ where `x` are the **structural** variables (bounds `col_lo`, `col_hi`, costs `c`
   lower bound with a nonnegative reduced cost).
 - `ftran` solves `B x = a` with `a` indexed by row and `x` by basis position; `btran` solves
   `B^T y = c` with `c` indexed by basis position and `y` by row.
+
+## Quadratic objective
+
+The objective of a model may carry a quadratic term:
+
+    objective = offset + c^T x + (1/2) x^T Q x,      Q symmetric.
+
+* **Storage.** `LpModel::quadratic` holds the LOWER TRIANGLE of Q (row index >= column index, diagonal included) as an
+  `n_cols x n_cols` CSC matrix; the empty 0x0 matrix means no quadratic term. An entry q_ij with i > j stands for
+  both q_ij and q_ji (the matrix is symmetric by construction, there is no way to store an asymmetric Q).
+  `validate()` rejects entries above the diagonal, non-finite values and a wrong shape. `quad_full()` builds both triangles.
+* **Contributions.** A diagonal entry q_jj adds (1/2) q_jj x_j^2 to the objective; an off-diagonal entry q_ij (i > j) adds
+  q_ij x_i x_j once in total ((1/2)(q_ij x_i x_j + q_ji x_j x_i)).
+* **Minimization form.** A maximization model has c AND Q negated: max c^T x + (1/2) x^T Q x is min (-c)^T x + (1/2) x^T (-Q) x.
+  "Convex" always refers to the minimization form: for a maximization model -Q must be positive semidefinite.
+* **KKT.** In minimization form the reduced costs are d = c + Q x - A^T y, with the same sign rules as for an LP
+  (y_i > 0 on an active lower row bound, y_i < 0 on an active upper one; d_j > 0 on a lower column bound, d_j < 0 on an
+  upper one). The primal objective is offset + c^T x + (1/2) x^T Q x and the dual objective is
+
+      sum_i y_i (active row bound) + sum_j d_j (active column bound) - (1/2) x^T Q x + offset.
+
+  Gap relation: with d = c + Q x - A^T y,  x^T d = c^T x + x^T Q x - y^T A x, hence
+
+      primal - dual = sum_j d_j (x_j - active bound_j) + sum_i y_i (row activity_i - active bound_i),
+
+  the complementarity sum, exactly as for an LP (Q only enters through d). For a convex QP any feasible (x, y) with the
+  sign rules satisfied has dual objective <= optimum (weak duality, see docs/QP.md and docs/CERTIFICATES.md).

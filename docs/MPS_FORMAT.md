@@ -10,9 +10,12 @@ Section keywords are case-insensitive; names are case-sensitive. Lines whose
 first character is `*`, and blank lines, are skipped. `NAME` may be omitted.
 `ENDATA` is required.
 
-Unsupported sections give an error naming the line: `QUADOBJ`, `QMATRIX`,
-`QSECTION`, `QCMATRIX` ("QPS not yet supported"), `SOS`, `INDICATORS`,
-`OBJNAME`. Any other keyword is an "unknown section".
+A quadratic objective is read from `QUADOBJ` or `QMATRIX` (QPS; exactly one of them, once, after `ROWS`; see
+docs/QP.md). Lines have the `COLUMNS` shape: `col1 col2 value` or `col1 col2 value col3 value` (fixed format: fields 2, 3, 4,
+5, 6). `QUADOBJ` lists every unordered pair once, in either triangle; a pair given twice (in either order) is an
+error. `QMATRIX` lists the full symmetric matrix; (i,j) and (j,i) must agree to a relative 1e-12 (the lower one is
+kept) and a missing mirror is an error. Quadratic constraints (`QSECTION`, `QCMATRIX`) give "quadratic constraints
+not supported". Other unsupported sections: `SOS`, `INDICATORS`, `OBJNAME`. Any other keyword is an "unknown section".
 
 ## Fixed versus free format
 

@@ -32,7 +32,7 @@ struct KktReport {
   /// max over rows/columns of |multiplier| * distance to the bound it pushes on.
   double complementarity_abs = 0.0;
   double complementarity_rel = 0.0;       // / objective scale (see above)
-  double primal_objective = 0.0;          // offset + c^T x   (minimization form)
+  double primal_objective = 0.0;          // offset + c^T x + (1/2) x^T Q x   (minimization form)
   double dual_objective = 0.0;            // see docs/CONVENTIONS.md
   double gap_abs = 0.0;
   double gap_rel = 0.0;                   // |p - d| / objective scale (see above)
@@ -43,6 +43,13 @@ struct KktReport {
   std::string summary() const;
 };
 
+/// For a model with a quadratic term (docs/QP.md) the reduced costs are d = c + Q x - A^T y (minimization form), the
+/// primal objective is offset + c^T x + (1/2) x^T Q x and the dual objective is
+///   sum_i y_i (active row bound) + sum_j d_j (active column bound) - (1/2) x^T Q x + offset.
+/// For x, y with the sign rules satisfied the gap equals the complementarity sum
+///   sum_j d_j (x_j - active column bound_j) + sum_i y_i (row activity_i - active row bound_i) >= 0,
+/// exactly as for an LP (the identity needs d = c + Q x - A^T y, which is how d is recomputed here).
+///
 /// Checks primal feasibility, dual feasibility, complementarity and the
 /// duality gap of `sol` for `model`. `ok` is true when every relative measure
 /// is at most `tol`. Independent of any presolve code.

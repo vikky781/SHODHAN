@@ -6,6 +6,7 @@
 #include <functional>
 #include <istream>
 #include <iterator>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -110,7 +111,7 @@ std::string snippet(std::string_view line) {
 // Sections and headers
 // ---------------------------------------------------------------------------
 
-enum class Section { None, Name, ObjSense, Rows, Columns, Rhs, Ranges, Bounds, End };
+enum class Section { None, Name, ObjSense, Rows, Columns, Rhs, Ranges, Bounds, QuadObj, QMatrix, End };
 
 struct HeaderInfo {
   bool is_header = false;
@@ -134,7 +135,8 @@ HeaderInfo classify_line(std::string_view line, Section current) {
   if (h.tokens.empty()) return h;
   h.keyword = to_upper(h.tokens[0]);
   if (current == Section::ObjSense && h.tokens.size() == 1 && is_sense_word(h.keyword)) return h;
-  if (h.tokens.size() == 1 || h.keyword == "NAME" || h.keyword == "OBJSENSE") {
+  if (h.tokens.size() == 1 || h.keyword == "NAME" || h.keyword == "OBJSENSE" || h.keyword == "QCMATRIX" ||
+      h.keyword == "QSECTION") {
     h.is_header = true;
   }
   return h;
@@ -148,6 +150,8 @@ Section section_from_keyword(const std::string& kw) {
   if (kw == "RHS") return Section::Rhs;
   if (kw == "RANGES") return Section::Ranges;
   if (kw == "BOUNDS") return Section::Bounds;
+  if (kw == "QUADOBJ") return Section::QuadObj;
+  if (kw == "QMATRIX") return Section::QMatrix;
   if (kw == "ENDATA") return Section::End;
   return Section::None;
 }
@@ -194,7 +198,7 @@ bool fixed_line_conforms(Section sec, std::string_view line, bool* has_space) {
   const std::string_view f4 = field(line, 24, 36);
   const std::string_view f5 = field(line, 39, 47);
   const std::string_view f6 = field(line, 49, 61);
-  if (sec == Section::Columns) {
+  if (sec == Section::Columns || sec == Section::QuadObj || sec == Section::QMatrix) {
     if (f2.empty() || f3.empty()) return false;
     if (f3 != "'MARKER'") {
       if (!numeric(f4)) return false;
@@ -230,7 +234,7 @@ bool detect_fixed(const std::vector<std::string_view>& lines) {
       continue;
     }
     if (sec == Section::Rows || sec == Section::Columns || sec == Section::Rhs ||
-        sec == Section::Ranges || sec == Section::Bounds) {
+        sec == Section::Ranges || sec == Section::Bounds || sec == Section::QuadObj || sec == Section::QMatrix) {
       if (!fixed_line_conforms(sec, line, &any_space)) return false;
     }
   }
@@ -359,8 +363,16 @@ class Parser {
   void handle_header(const HeaderInfo& h) {
     leave_section();
     const std::string& kw = h.keyword;
-    if (kw == "QUADOBJ" || kw == "QMATRIX" || kw == "QSECTION" || kw == "QCMATRIX") {
-      fail("QPS not yet supported: quadratic section '" + std::string(h.tokens[0]) + "'");
+    if (kw == "QSECTION" || kw == "QCMATRIX") {
+      fail("quadratic constraints not supported (section '" + std::string(h.tokens[0]) + "'); only a quadratic objective (QUADOBJ or QMATRIX) can be read");
+    }
+    if (kw == "QUADOBJ" || kw == "QMATRIX") {
+      if (!seen_rows_) fail("section " + kw + " appears before ROWS");
+      if (!(quad_kind_.empty() || quad_kind_ == kw)) fail("QUADOBJ and QMATRIX cannot both be given");
+      if (!quad_kind_.empty()) fail("section " + kw + " appears twice");
+      quad_kind_ = kw;
+      section_ = kw == "QUADOBJ" ? Section::QuadObj : Section::QMatrix;
+      return;
     }
     if (kw == "NAME") {
       section_ = Section::Name;
@@ -428,6 +440,8 @@ class Parser {
       case Section::Columns:
       case Section::Rhs:
       case Section::Ranges:
+      case Section::QuadObj:
+      case Section::QMatrix:
         add(field(cur_, 4, 12));
         add(field(cur_, 14, 22));
         add(field(cur_, 24, 36));
@@ -472,8 +486,26 @@ class Parser {
       case Section::Bounds:
         handle_bound(tok);
         return;
+      case Section::QuadObj:
+      case Section::QMatrix:
+        handle_quad(tok);
+        return;
       case Section::End:
         return;
+    }
+  }
+
+  // QUADOBJ / QMATRIX lines: "col1 col2 value" or "col1 col2 value col3 value" (like COLUMNS: the first name is
+  // shared). The meaning of the entries is fixed in finish() (docs/QP.md).
+  void handle_quad(const std::vector<std::string_view>& tok) {
+    if (tok.size() != 3 && tok.size() != 5) {
+      fail("expected 3 or 5 fields in " + quad_kind_ + ", found " + std::to_string(tok.size()));
+    }
+    const int a = lookup_col(tok[0]);
+    for (std::size_t k = 1; k + 1 < tok.size(); k += 2) {
+      const int b = lookup_col(tok[k]);
+      const double v = coefficient(tok[k + 1]);
+      quad_entries_.push_back({a, b, v, line_no_});
     }
   }
 
@@ -696,6 +728,61 @@ class Parser {
     }
   }
 
+  // ---- quadratic objective ----
+  [[noreturn]] void fail_at_line(std::size_t line, const std::string& message) {
+    line_no_ = line;
+    cur_ = lines_[line - 1];
+    fail(message);
+  }
+
+  // Builds the lower triangle of Q (docs/QP.md).
+  //  QUADOBJ: every unordered pair is listed once (either triangle); the value is q_ij = q_ji.
+  //  QMATRIX: every entry of the full symmetric matrix is listed; (i,j) and (j,i) must agree.
+  void build_quadratic() {
+    if (quad_entries_.empty()) return;
+    std::map<std::pair<int, int>, std::pair<double, std::size_t>> seen;  // (row, col) as listed
+    for (const QEntry& e : quad_entries_) {
+      const std::pair<int, int> key = quad_kind_ == "QUADOBJ" ? std::make_pair(std::max(e.i, e.j), std::min(e.i, e.j))
+                                                              : std::make_pair(e.i, e.j);
+      const auto ins = seen.emplace(key, std::make_pair(e.value, e.line));
+      if (!ins.second) {
+        fail_at_line(e.line, quad_kind_ == "QUADOBJ"
+                                 ? "duplicate QUADOBJ entry for columns '" + col_names_[to_size(e.i)] + "' and '" + col_names_[to_size(e.j)] +
+                                       "' (each unordered pair is given once; use QMATRIX to list both triangles)"
+                                 : "duplicate QMATRIX entry for columns '" + col_names_[to_size(e.i)] + "' and '" + col_names_[to_size(e.j)] + "'");
+      }
+    }
+    std::vector<Triplet> t;
+    for (const auto& kv : seen) {
+      const int r = kv.first.first, c = kv.first.second;
+      if (quad_kind_ == "QMATRIX") {
+        if (r < c) {
+          const auto mirror = seen.find({c, r});
+          if (mirror == seen.end()) {
+            fail_at_line(kv.second.second, "QMATRIX is not symmetric: entry (" + col_names_[to_size(r)] + ", " + col_names_[to_size(c)] + ") has no mirror entry");
+          }
+          continue;
+        }
+        if (r > c) {
+          const auto mirror = seen.find({c, r});
+          if (mirror == seen.end()) {
+            fail_at_line(kv.second.second, "QMATRIX is not symmetric: entry (" + col_names_[to_size(r)] + ", " + col_names_[to_size(c)] + ") has no mirror entry");
+          }
+          const double a = kv.second.first, b = mirror->second.first;
+          if (std::fabs(a - b) > 1e-12 * std::max(1.0, std::max(std::fabs(a), std::fabs(b)))) {
+            fail_at_line(kv.second.second, "QMATRIX is not symmetric: entries (" + col_names_[to_size(r)] + ", " + col_names_[to_size(c)] + ") and the mirror differ");
+          }
+        }
+      }
+      if (kv.second.first != 0.0) t.push_back({r, c, kv.second.first});
+    }
+    if (t.empty()) return;
+    std::string error;
+    if (!SparseMatrix::from_triplets(model_.n_cols, model_.n_cols, std::move(t), &model_.quadratic, &error)) {
+      throw ParseError{source_ + ": internal error assembling the quadratic term: " + error};
+    }
+  }
+
   // ---- model assembly ----
   void finish() {
     LpModel& m = model_;
@@ -750,6 +837,7 @@ class Parser {
     if (!SparseMatrix::from_triplets(m.n_rows, m.n_cols, std::move(triplets_), &m.A, &error)) {
       throw ParseError{source_ + ": internal error assembling the matrix: " + error};
     }
+    build_quadratic();
     m.col_cost = std::move(col_cost_);
     m.col_lower = std::move(col_lower_);
     m.col_upper = std::move(col_upper_);
@@ -794,6 +882,15 @@ class Parser {
   SetTracker rhs_set_;
   SetTracker ranges_set_;
   SetTracker bounds_set_;
+
+  struct QEntry {
+    int i;
+    int j;
+    double value;
+    std::size_t line;
+  };
+  std::string quad_kind_;
+  std::vector<QEntry> quad_entries_;
 
   LpModel model_;
   std::vector<std::string> warnings_;
