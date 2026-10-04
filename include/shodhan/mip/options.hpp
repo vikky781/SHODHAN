@@ -86,6 +86,7 @@ struct MipOptions {
 
   // ---- pipeline ----
   bool presolve = true;
+  bool probing = true;  ///< probing in the MIP presolve (implications and cliques for the cuts)
   bool scaling = true;
   /// Dual simplex iteration limit for one node LP before it counts as numerical trouble.
   long long node_iteration_limit = 1000000;

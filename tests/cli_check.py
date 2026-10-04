@@ -218,6 +218,16 @@ def main():
         check("solve with an unknown node selection is a usage error (1)", rc == 1 and "unknown node selection" in err, err)
         rc, _, err = run(exe, "solve", knap, "--heuristics", "maybe")
         check("solve --heuristics maybe is a usage error (1)", rc == 1, err)
+        rc, out, _ = run(exe, "solve", knap, "--cuts", "on", "--cut-rounds", "3", "--presolve", "off", "--probing", "off")
+        check("solve accepts --cuts, --cut-rounds, --presolve and --probing and prints the cut summary",
+              rc == 0 and "Objective:     -687" in out and "Cuts:" in out, repr((rc, out[-300:])))
+        rc, out, _ = run(exe, "solve", knap, "--cuts", "off")
+        check("solve --cuts off runs no cut loop and finds the same optimum",
+              rc == 0 and "Objective:     -687" in out and "Cuts:" not in out, repr((rc, out[-300:])))
+        rc, _, err = run(exe, "solve", knap, "--cuts", "maybe")
+        check("solve --cuts maybe is a usage error (1)", rc == 1, err)
+        rc, _, err = run(exe, "solve", knap, "--cut-rounds", "-2")
+        check("solve --cut-rounds -2 is a usage error (1)", rc == 1, err)
     # ---- gzip input: read with zlib when built with it, otherwise a clear error; the helper script always works ----
     gz = os.path.join(models, "tiny_lp.mps.gz")
     rc, out, err = run(exe, "info", gz)

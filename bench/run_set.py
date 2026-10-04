@@ -28,7 +28,8 @@ LIMIT_STATUSES = ("NodeLimit", "TimeLimit", "Timeout", "IterationLimit")
 
 def parse_output(text):
     info = {"status": "", "objective": "", "bound": "", "gap": "", "nodes": "", "iterations": "",
-            "primal": "", "dual": "", "compl": "", "kkt_gap": ""}
+            "primal": "", "dual": "", "compl": "", "kkt_gap": "", "presolve": "", "cuts_added": "", "cuts_kept": "",
+            "root_no_cuts": "", "root_cuts": "", "gap_closed": ""}
     m = re.search(r"^Status:\s+(\S+)", text, re.M)
     if m:
         info["status"] = m.group(1)
@@ -47,6 +48,22 @@ def parse_output(text):
     m = re.search(r"^Iterations:\s+(\d+)", text, re.M) or re.search(r"^LP iterations:\s+(\d+)", text, re.M)
     if m:
         info["iterations"] = m.group(1)
+    m = re.search(r"^Presolve:\s+rows (\d+) -> (\d+), columns (\d+) -> (\d+)", text, re.M)
+    if m:
+        info["presolve"] = "%sx%s->%sx%s" % (m.group(1), m.group(3), m.group(2), m.group(4))
+    m = re.search(r"^Cuts:\s+\d+ round\(s\), (\d+) added, \d+ removed, (\d+) kept", text, re.M)
+    if m:
+        info["cuts_added"], info["cuts_kept"] = m.group(1), m.group(2)
+    m = re.search(r"^Root bound:\s+(\S+) without cuts, (\S+) with cuts", text, re.M)
+    if m:
+        info["root_no_cuts"], info["root_cuts"] = m.group(1), m.group(2)
+        # Share of the root gap closed by the cuts, measured against the final objective when it is optimal.
+        try:
+            lp, cut, obj = float(m.group(1)), float(m.group(2)), float(info["objective"])
+            if info["status"] == "Optimal" and abs(obj - lp) > 1e-9:
+                info["gap_closed"] = "%.1f" % (100.0 * (cut - lp) / (obj - lp))
+        except ValueError:
+            pass
     for key, label in (("primal", "primal infeasibility"), ("dual", "dual infeasibility"),
                        ("compl", "complementarity"), ("kkt_gap", "duality gap")):
         m = re.search(r"^\s*" + label + r"\s+\S+ abs, (\S+) rel", text, re.M)
@@ -127,14 +144,17 @@ def main(argv=None):
         else:
             failed += 1
         rows.append([name, status, info["objective"], info["bound"], info["gap"], info["nodes"], info["iterations"],
-                     "%.3f" % secs, info["primal"], info["dual"], info["compl"], info["kkt_gap"], code, note])
+                     "%.3f" % secs, info["primal"], info["dual"], info["compl"], info["kkt_gap"], code, note,
+                     info["presolve"], info["cuts_added"], info["cuts_kept"], info["root_no_cuts"], info["root_cuts"],
+                     info["gap_closed"]])
         print("%-22s %-14s obj %-16s bound %-16s gap %-8s nodes %-7s %8.2fs %s" %
               (name, status, info["objective"] or "-", info["bound"] or "-", (info["gap"] + "%") if info["gap"] else "-",
                info["nodes"] or "-", secs, note))
     with open(args.csv, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["name", "status", "objective", "best_bound", "gap_percent", "nodes", "iterations", "seconds",
-                    "primal_rel", "dual_rel", "compl_rel", "kkt_gap_rel", "exit_code", "note"])
+                    "primal_rel", "dual_rel", "compl_rel", "kkt_gap_rel", "exit_code", "note", "presolve_size",
+                    "cuts_added", "cuts_kept", "root_bound_no_cuts", "root_bound_cuts", "root_gap_closed_percent"])
         w.writerows(rows)
     print("\nsolved %d, stopped at a limit %d, failed (any other status) %d, mismatches %d%s; results in %s" %
           (solved, limit, failed, mismatch, (", without reference %d" % missing_ref) if ref else "", args.csv))

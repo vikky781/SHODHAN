@@ -38,6 +38,7 @@ void print_usage(std::ostream& out) {
       << "                       [--mip-gap g] [--mip-abs-gap g] [--node-limit n] [--seed s]\n"
       << "                       [--branching reliability|pseudocost|mostfrac|first]\n"
       << "                       [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n"
+      << "                       [--presolve on|off] [--probing on|off] [--cuts on|off] [--cut-rounds n]\n"
       << "                             solve an LP (presolve, scaling, dual simplex, KKT check on\n"
       << "                             the original model) or a MILP (branch and bound with\n"
       << "                             reliability branching and primal heuristics); quadratic\n"

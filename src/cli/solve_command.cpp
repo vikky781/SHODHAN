@@ -33,7 +33,8 @@ int usage_error(const std::string& message) {
                "                     [--iter-limit n] [--write-sol path] [--write-cert path] [--verbose]\n"
                "                     MILP: [--mip-gap g] [--mip-abs-gap g] [--node-limit n] [--seed s]\n"
                "                           [--branching reliability|pseudocost|mostfrac|first]\n"
-               "                           [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n";
+               "                           [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n"
+               "                           [--presolve on|off] [--probing on|off] [--cuts on|off] [--cut-rounds n]\n";
   return kExitUsage;
 }
 
@@ -119,6 +120,25 @@ int run_solve(const std::vector<std::string>& args) {
         if (value != "on" && value != "off") return usage_error("--heuristics needs on or off");
         mopt.heuristics = value == "on";
       }
+    } else if (a == "--presolve" || a == "--probing" || a == "--cuts") {
+      if (i + 1 >= args.size()) return usage_error(a + " needs on or off");
+      const std::string value = args[++i];
+      if (value != "on" && value != "off") return usage_error(a + " needs on or off");
+      const bool on = value == "on";
+      if (a == "--presolve") {
+        opt.presolve = on;
+      } else if (a == "--probing") {
+        mopt.probing = on;
+      } else {
+        mopt.cuts = on;
+      }
+    } else if (a == "--cut-rounds") {
+      double v = 0.0;
+      if (i + 1 >= args.size() || !parse_number(args[i + 1], &v) || v < 0.0 || v != std::floor(v)) {
+        return usage_error("--cut-rounds needs a non-negative integer");
+      }
+      mopt.cut_rounds = static_cast<int>(v);
+      ++i;
     } else if (a == "--write-cert") {
       if (i + 1 >= args.size()) return usage_error("--write-cert needs a file name");
       cert_path = args[++i];

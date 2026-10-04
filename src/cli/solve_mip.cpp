@@ -56,6 +56,24 @@ int run_solve_mip(const LpModel& model, const std::string& model_path, const mip
                   r.seconds_diving);
     std::cout << buf;
   }
+  if (r.cuts.ran) {
+    const mip::CutSummary& c = r.cuts;
+    std::cout << "Cuts:          " << c.rounds << " round(s), " << c.cuts_added << " added, " << c.cuts_removed << " removed, " << c.cuts_kept
+              << " kept (stopped: " << c.stopped_because << ")";
+    if (c.abandoned) std::cout << "; ABANDONED after a numerical failure";
+    if (c.infeasible) std::cout << "; the LP with cuts was infeasible";
+    std::cout << "\n";
+    if (c.has_bounds && !c.infeasible) {
+      std::cout << "Root bound:    " << num(c.root_bound_without_cuts) << " without cuts, " << num(c.root_bound_with_cuts) << " with cuts" << "\n";
+    }
+    std::cout << "Separators:    ";
+    bool first = true;
+    for (const mip::CutSeparatorSummary& s : c.separators) {
+      std::cout << (first ? "" : ", ") << s.name << " " << s.added << " added/" << s.candidates << " candidates";
+      first = false;
+    }
+    std::cout << "\n";
+  }
   if (!r.heuristics.empty()) {
     std::cout << "Heuristics:    ";
     bool first = true;

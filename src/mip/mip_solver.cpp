@@ -142,6 +142,7 @@ bool Search::setup_presolve(MipResult& res) {
     PresolveOptions po;
     po.is_mip = true;
     po.need_duals = false;
+    po.probing = opt_.probing;
     pre_ = presolve(original_, po);
     presolved_ = true;
     res.presolve_rows_before = original_.n_rows;
