@@ -98,7 +98,8 @@ TEST_CASE(cuts_are_valid_for_every_feasible_integer_point_presolve_off) {
     std::cout << "\n";
   }
   CHECK_EQ(violations, 0);
-  CHECK(enumerated >= 500);
+  // 500 models at the default size; proportionally fewer when SHODHAN_CUT_SEEDS is lowered (sanitizer runs).
+  CHECK(enumerated >= (per_family >= 90 ? 500 : static_cast<long long>(per_family) * 4));
   CHECK(ran > 0 && 100 * fractional >= 60 * ran);
 }
 

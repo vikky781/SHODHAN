@@ -8,7 +8,8 @@ that recovers primal and dual solutions. It also has the sparse LU factorization
 of simplex bases (with FTRAN/BTRAN and the Forrest-Tomlin update) that a simplex
 solver sits on. LPs can now be solved end to end (presolve, scaling, dual simplex with a primal
 cleanup, KKT check on the original model), and MILPs by branch and bound with reliability branching and primal
-heuristics (tested on small generated instances only). Every LP result can be
+heuristics, a MIP presolve (propagation, probing, clique table) and a root cut loop (Gomory, MIR, cover, clique, implied
+bound) (all tested on small generated instances only). Every LP result can be
 written as a certificate and checked by KASAUTI, an independent verifier in standard-library Python
 that works in exact arithmetic.
 
@@ -57,6 +58,11 @@ range (a failing seed is printed):
 SHODHAN_SEED_FIRST=1 SHODHAN_SEED_COUNT=6000 build/shodhan_tests presolve
 ```
 
+The MIP tests have their own counts: `SHODHAN_MIP_SEED_COUNT` (MIP presolve equivalence, default 1000),
+`SHODHAN_CUT_SEEDS` (cut validity, models per family, default 90 over 8 families) and `SHODHAN_CUT_PIPE_SEEDS` (cuts in the whole
+pipeline, per family, default 125). The sanitizer test preset (`ctest --preset debug-sanitizers`, used in CI) sets them to
+150, 12 and 20, because the sanitizer build is several times slower; the release jobs use the defaults.
+
 ## Usage
 
 ```sh
@@ -67,6 +73,7 @@ shodhan solve model.mps [--no-presolve] [--no-scaling] [--no-perturb] [--time-li
                            [--mip-gap g] [--mip-abs-gap g] [--node-limit n] [--seed s]
                            [--branching reliability|pseudocost|mostfrac|first]
                            [--node-select bestbound|depth|bestestimate] [--heuristics on|off]
+                           [--presolve on|off] [--probing on|off] [--cuts on|off] [--cut-rounds n]
 shodhan dump-model model.mps   # canonical text of the parsed model (compares readers)
 shodhan factor-bench model.mps [--threshold u] [--max-updates k]
 shodhan --help
@@ -152,13 +159,14 @@ certificate passes in exact and in float mode, 120 of them rigorously and 306 to
 | Branching: most fractional, first index, pseudocost, reliability (strong branching on engine copies) | implemented |
 | Primal heuristics: trivial, simple rounding, fractional and coefficient diving, Feasibility Jump | implemented |
 | MILP certificates (feasible point, exact integrality; the bound is claimed, not verified) | implemented |
-| Cutting planes, restarts, MIP presolve beyond step 2, multithreading | not yet implemented |
+| MIP presolve: bound propagation, coefficient tightening, probing, parallel rows, duplicate and dominated columns, clique table | implemented; tested on generated instances only |
+| Root cut loop: Gomory mixed-integer, MIR with aggregation, lifted covers, clique, implied-bound cuts; `add_rows`/`remove_rows` on the engine | implemented; tested on generated instances only |
+| Restarts, cuts at tree nodes, zero-half cuts, RENS/RINS, multithreading | not yet implemented |
 | Convex QP                                            | not yet implemented |
 | GPU acceleration                                     | not yet implemented |
 
-Open findings (details in [docs/KASAUTI.md](docs/KASAUTI.md)): on wide-coefficient LPs the engine can end with
-`NumericalError` on an exactly unbounded model (seed 450165), and polishing can leave a wrong-signed multiplier that
-costs about 4e-6 relative objective accuracy (seed 433). Both are reproducible with the stress harness.
+Hypersensitive LPs: wide seed 450741 may end in an honest `NumericalError` on some platforms. The two earlier open findings
+(seeds 450165 and 433) are fixed; details and evidence in [docs/KASAUTI.md](docs/KASAUTI.md).
 
 Testing note: LP presolve is checked against a small dense simplex that lives in
 `tests/support/` and is a test oracle only (it is not part of the library). On extreme
@@ -187,6 +195,7 @@ linked into `shodhan_core`.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map,
 [docs/CONVENTIONS.md](docs/CONVENTIONS.md) for the sign and scaling conventions,
 [docs/PRESOLVE.md](docs/PRESOLVE.md) for each reduction and its postsolve,
+[docs/MIP.md](docs/MIP.md) for the branch and bound and [docs/CUTS.md](docs/CUTS.md) for the cutting planes,
 [docs/LU.md](docs/LU.md) for the basis factorization and its update,
 [docs/SIMPLEX.md](docs/SIMPLEX.md) for the simplex engine and the LP pipeline,
 [docs/CERTIFICATES.md](docs/CERTIFICATES.md) for the certificate format and the checks,

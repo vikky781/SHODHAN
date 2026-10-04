@@ -107,8 +107,8 @@ point and ray. Results (`tests/support/adjudicated_seeds.hpp`):
 | 450835 | optimal, -9.3281250009935022 | optimal, relative error 2.9e-10 | relative error 1.6e-4 | oracle wrong |
 | 453961 | optimal, 20.123667009608404 | optimal, relative error 5.5e-9 | relative error 0.19 | oracle wrong |
 | 451287 | unbounded | was NumericalError, fixed: unbounded | unbounded | engine bug fixed |
-| 450165 | unbounded | NumericalError | unbounded | open: see below |
-| 433 | optimal, 7.4272773546400339 | optimal, relative error 3.9e-6 | correct | open: polishing leaves a multiplier of 2.8e-8 on an infinite bound |
+| 450165 | unbounded | was NumericalError, fixed: unbounded (point from a zero-cost feasibility solve, ray cleaned) | unbounded | engine bug fixed; KASAUTI `PASS_UNBOUNDED_TOL` |
+| 433 | optimal, 7.4272773546400339 | was optimal with relative error 3.9e-6, fixed: error 5e-14 | correct | engine bug fixed; KASAUTI `PASS_OPTIMAL_TOL`, agreement 6.7e-6 before, 4.2e-13 after |
 | 1999 | infeasible by far less than any tolerance | optimal within tolerance | optimal | tolerance-level agreement |
 
 The pipeline's strict certificates for the optimal cases all `FAIL` in strict mode (the strict dual bound is
@@ -118,10 +118,26 @@ is expected and is why `PASS_OPTIMAL_TOL` exists; the exact solve is what decide
 Fixed: the point of an unbounded certificate was the incrementally updated primal vector, which drifts on
 ill-conditioned bases (seed 451287: rows violated by 1e-2 relative); it is now taken from a fresh factorization.
 
-Open (not fixed, reported): seed 450165 returns `NumericalError` on an exactly unbounded LP (an equality row of
-the engine's point is off by 2.3e-6 relative, above the acceptance tolerance; iterative refinement did not
-change it); seed 433 is accepted with a relative objective error of 3.9e-6 because polishing, which is
-best-effort with an iteration cap, ends with a wrong-signed multiplier of 2.8e-8.
+Fixed since: seed 450165 ended as `NumericalError` because the engine point came from a basis too ill-conditioned to
+satisfy an equality row better than 2.3e-6 relative; it is now recomputed by a zero-cost feasibility solve at
+`primal_tol 1e-10` (violation 0) and the ray is normalized and cleared of rounding noise. KASAUTI also measured ray row
+violations against the magnitude of the row's nonzero terms under the ray, which is exactly 1 for a one-term row; it now
+uses the normwise `||a_i||_1 ||r||_inf` like the columns. Seed 433 was accepted with a relative objective error of
+3.9e-6 because polishing at 1e-13 took the dual-simplex branch, which shifts the costs of wrong-signed reduced costs
+and hid a 2e-7 dual infeasibility; polishing now restores the costs before each check and alternates primal and dual
+passes (up to four).
+
+Evidence (generated with `shodhan_stress wide N N --emit-mps`, certificates by `shodhan solve --write-cert`):
+
+| Seed | Before (commit d097fc0) | After |
+|------|-------------------------|-------|
+| 450165 | `NumericalError`, certificate status `other`, KASAUTI `INCONCLUSIVE` | `Unbounded`, ray rate -3.625, KASAUTI `PASS_UNBOUNDED_TOL` (strict and default mode) |
+| 433 | objective 7.4273105236 (exact 7.4272773546400339), KASAUTI `PASS_OPTIMAL_TOL` with agreement 6.7e-6 | objective 7.42727735464, `PASS_OPTIMAL_TOL` with agreement 4.2e-13 |
+
+In strict mode (`--dual-zero-tol 0`) seed 433 is `FAIL` before and after: a floating-point multiplier of 2.8e-8 sits on
+a column without an upper bound, so no rigorous dual bound exists; that is the documented limit of strict mode, not a
+defect of the answer. The unbounded certificate of 450165 is tolerance-checked (cone conditions hold at 1e-9), not
+exact. Seed 450741 stays a hypersensitive case: the pipeline may return an honest `NumericalError` on some platforms.
 
 ## Limits
 

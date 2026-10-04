@@ -76,9 +76,9 @@ TEST_CASE(cuts_full_pipeline_agrees_with_brute_force) {
   std::cout << "    cuts + presolve on/off vs brute force: " << agree << " of " << total << " agree; the cut loop ran on " << with_cuts
             << ", " << cuts_added << " cuts added, " << abandoned << " loops abandoned; root bound valid and monotone in " << bound_ok
             << " of " << bound_checked << "\n";
-  CHECK(total >= 900);
+  CHECK(total >= static_cast<long long>(per_family) * 8 * 9 / 10);
   CHECK_EQ(agree, total);
-  CHECK(with_cuts > 300);
+  CHECK(with_cuts * 10 > total * 3);
 }
 
 // After at most 5 nodes the reported bound must still be a valid bound on the optimum.

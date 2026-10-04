@@ -6,14 +6,15 @@ guarantees, and nothing here is a performance claim.
 
 ## 1. Pipeline
 
-1. **Presolve** with the MIP-safe reductions of step 2 only ([PRESOLVE.md](PRESOLVE.md)): no dual information is
-   reconstructed. The reduced model is always a minimization. If presolve proves the model infeasible the result is
+1. **Presolve** with the MIP reductions ([PRESOLVE.md](PRESOLVE.md): bound propagation, coefficient tightening,
+   probing, parallel rows, duplicate and dominated columns, clique table): no dual information is reconstructed. The reduced model is always a minimization. If presolve proves the model infeasible the result is
    `Infeasible`; if it finds an improving ray the result is `InfeasibleOrUnbounded`; if it solves everything, the
    point goes through the incumbent manager like any other candidate.
 2. **Scaling** ([CONVENTIONS.md](CONVENTIONS.md)); integer columns keep scale 1, so bounds and integrality mean the
    same in the scaled and the unscaled space.
 3. **Heuristics that need no LP** (trivial, Feasibility Jump) run before the root LP.
-4. **Root LP** with the dual simplex, then the search (section 2).
+4. **Root LP** with the dual simplex, then the **root cut loop** ([CUTS.md](CUTS.md): Gomory, MIR, cover, clique and
+   implied-bound cuts added to the engine as rows; only binding cuts stay), then the search (section 2).
 5. Every solution is mapped back to the original space and **verified against the original model** by the incumbent
    manager (section 6) before it is reported.
 
@@ -155,19 +156,37 @@ dense branch and bound (`tests/support/mip_oracle.*`, never linked into the libr
 - 150 MILP certificates verified by KASAUTI in exact and float mode; mutation tests (broken integrality, a broken row,
   a changed objective, a wrong-side bound, a claimed optimality) are all detected.
 
-## 10. Limitations
+## 10. Scalability measurements (generated instances, one machine, MinGW build; measurements, not performance claims)
 
-- No cutting planes (the `Separator` interface has no implementation), no MIP presolve beyond the step 2 reductions, no
-  restarts, no reduced-cost fixing, no conflict analysis, single-threaded.
-- Strong branching and diving copy the whole engine for every probe; this is simple and safe but wasteful on large models.
-- The node arena is never compacted.
+Taken on generated MILPs of 2000 to 4130 rows (set cover, sparse set cover, facility location) before the changes below:
+
+- One copy of the engine cost 0.9 to 1.5 ms (the factorization 0.4 to 0.9 ms, the state vectors 0.004 to 0.007 ms), a
+  probe solve 17 to 40 ms: the copies were only a few percent of the strong-branching time. Probes now save and restore
+  the engine state (`EngineProbe`, `save_state`/`restore_state`; the factorization is rebuilt lazily) instead of
+  copying the engine; a probed engine solves bit for bit like one that never probed (test: 1000 random nested probes).
+- The cost per dual simplex iteration is structural: the entering-column ftran is dense (1557 of 2000 entries on a set
+  cover). Strong branching dominated the run time on the largest set cover (46 of 60 s).
+- Finished nodes are released (slot reuse, deterministic ids, `max_stored_bases` respected); a depth-first search
+  that created 3119 nodes kept at most 60 alive. `MipResult` reports `nodes_created`, `peak_live_nodes` and the split of
+  LP iterations and time (root, nodes, diving, cuts, strong branching).
+- `.gz` input needs zlib (`SHODHAN_ENABLE_ZLIB`); `scripts/gunzip_mps.py` expands files without it.
+
+## 11. Limitations
+
+- Cutting planes are generated at the root only (no cuts at tree nodes, no zero-half cuts, no cut pool across nodes);
+  no restarts, no reduced-cost fixing, no conflict analysis, single-threaded. RENS and RINS (optional in the plan) were
+  not implemented.
+- The cut separators were validated on small generated models only; their effect on real instances is unknown. In the
+  generated ablation the clique and implied-bound separators changed nothing once Gomory and MIR were on.
+- A cut loop that makes the root LP infeasible reports `Infeasible` without a certificate.
+- The node arena reuses slots of finished nodes but is never shrunk.
 - Verified only on small generated instances; no MIPLIB or other real instance was run, so nothing is known about
   behaviour on hard or large problems.
 - A node whose LP cannot be solved reliably makes the search incomplete rather than being resolved by a more careful
   method.
 - Unbounded MILPs are reported as `InfeasibleOrUnbounded`, not `Unbounded`.
 
-## 11. References
+## 12. References
 
 - T. Achterberg, T. Koch, A. Martin, "Branching rules revisited", Operations Research Letters 33 (2005) 42-54.
 - B. Luteberget, G. Sartor, "Feasibility Jump: an LP-free Lagrangian MIP heuristic", Mathematical Programming Computation

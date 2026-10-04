@@ -376,9 +376,9 @@ TEST_CASE(presolve_mip_equivalence_with_brute_force_on_the_original_model) {
     if (ty.fired[k] < minimum) std::cout << "  INCONCLUSIVE for this reduction (fired on fewer than " << minimum << " models)";
     std::cout << "\n";
   }
-  CHECK(ty.seeds >= 1000);
-  CHECK(ty.feasible > 200);
-  CHECK(ty.infeasible > 20);
+  CHECK(ty.seeds >= static_cast<int>(count) * 9 / 10);  // 1000 seeds at the default size
+  CHECK(ty.feasible > static_cast<int>(count) / 5);
+  CHECK(ty.infeasible > static_cast<int>(count) / 50);
 }
 
 TEST_CASE(presolve_mip_parallel_rows_keep_the_tighter_bound_of_each_side) {

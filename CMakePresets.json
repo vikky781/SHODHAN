@@ -31,7 +31,12 @@
     {
       "name": "debug-sanitizers",
       "configurePreset": "debug-sanitizers",
-      "output": { "outputOnFailure": true }
+      "output": { "outputOnFailure": true },
+      "environment": {
+        "SHODHAN_MIP_SEED_COUNT": "150",
+        "SHODHAN_CUT_SEEDS": "12",
+        "SHODHAN_CUT_PIPE_SEEDS": "20"
+      }
     }
   ]
 }
