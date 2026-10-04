@@ -41,15 +41,19 @@ int run_solve_mip(const LpModel& model, const std::string& model_path, const mip
     std::cout << buf;
   }
   std::cout << "Nodes:         " << r.nodes_processed << " processed, " << r.nodes_open << " open, maximum depth " << r.max_depth << "\n";
-  std::cout << "LP iterations: " << r.lp_iterations << " (strong branching: " << r.strong_branching_iterations << " in " << r.strong_branching_calls << " child solves)\n";
+  std::cout << "LP iterations: " << r.lp_iterations << " (root " << r.root_lp_iterations << ", nodes " << r.node_lp_iterations << ", diving "
+            << r.diving_iterations << ", cuts " << r.cut_lp_iterations << "); strong branching: " << r.strong_branching_iterations << " in "
+            << r.strong_branching_calls << " child solves\n";
   if (r.presolve_cols_before > 0) {
     std::cout << "Presolve:      rows " << r.presolve_rows_before << " -> " << r.presolve_rows_after << ", columns " << r.presolve_cols_before << " -> "
               << r.presolve_cols_after << "\n";
   }
   {
-    char buf[200];
-    std::snprintf(buf, sizeof(buf), "Time:          %.3f s (presolve %.3f, root LP %.3f, node LPs %.3f, branching %.3f, heuristics %.3f)\n", r.seconds_total,
-                  r.seconds_presolve, r.seconds_root_lp, r.seconds_node_lps, r.seconds_strong_branching, r.seconds_heuristics);
+    char buf[260];
+    std::snprintf(buf, sizeof(buf),
+                  "Time:          %.3f s (presolve %.3f, root LP %.3f, cuts %.3f, node LPs %.3f, strong branching %.3f, heuristics %.3f of which diving %.3f)\n",
+                  r.seconds_total, r.seconds_presolve, r.seconds_root_lp, r.seconds_cuts, r.seconds_node_lps, r.seconds_strong_branching, r.seconds_heuristics,
+                  r.seconds_diving);
     std::cout << buf;
   }
   if (!r.heuristics.empty()) {

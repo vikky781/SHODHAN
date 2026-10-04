@@ -56,10 +56,16 @@ struct MipResult {
 
   long long nodes_processed = 0;
   long long nodes_open = 0;
-  long long lp_iterations = 0;
+  long long lp_iterations = 0;            ///< all simplex iterations: root + nodes + diving + cuts (strong branching is separate)
+  long long root_lp_iterations = 0;       ///< iterations of the root LP
+  long long node_lp_iterations = 0;       ///< iterations of the node LPs after the root
+  long long diving_iterations = 0;        ///< iterations spent by the diving heuristics
+  long long cut_lp_iterations = 0;        ///< iterations of the re-solves of the root cut loop
   long long strong_branching_iterations = 0;
   long long strong_branching_calls = 0;
   int max_depth = 0;
+  long long nodes_created = 0;     ///< nodes ever created (ids are never reused)
+  long long peak_live_nodes = 0;   ///< the largest number of nodes in memory at the same time (finished nodes are released)
   long long numerical_trouble_nodes = 0;  ///< nodes whose LP failed twice (the search is then incomplete)
   long long nodes_pruned_by_bound = 0;
   long long nodes_pruned_infeasible = 0;
@@ -75,7 +81,9 @@ struct MipResult {
   double seconds_root_lp = 0.0;
   double seconds_node_lps = 0.0;
   double seconds_strong_branching = 0.0;
-  double seconds_heuristics = 0.0;
+  double seconds_heuristics = 0.0;   ///< all primal heuristics (includes diving)
+  double seconds_diving = 0.0;       ///< of which the diving heuristics
+  double seconds_cuts = 0.0;         ///< separation, cut selection and the LP re-solves of the root cut loop
 
   /// The LP relaxation was proven infeasible by the simplex (Farkas): `lp_farkas` (original rows) certifies
   /// it. When status is Infeasible and this is false, infeasibility was proved by branching (or presolve) and

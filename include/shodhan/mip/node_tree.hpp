@@ -14,7 +14,7 @@ namespace shodhan::mip {
 using NodeId = std::int64_t;
 constexpr NodeId kNoNode = -1;
 
-/// New bounds of a column (they replace the current ones inside the node's subtree; the tree intersects them
+/// New bounds of a column (they replace the current ones inside the subtree of a node; the tree intersects them
 /// with what the ancestors set).
 struct BoundChange {
   Index col = 0;
@@ -33,15 +33,20 @@ struct Node {
   Index branch_col = -1;     ///< -1 for the root
   int branch_dir = 0;        ///< -1 down branch (upper bound lowered), +1 up branch, 0 root
   double branch_value = 0.0; ///< the fractional LP value of branch_col at the parent
-  double lower_bound = 0.0;  ///< the parent's LP objective, strengthened by the objective granularity (minimization form)
-  double parent_objective = 0.0;  ///< the parent's raw LP objective (pseudocost updates)
+  double lower_bound = 0.0;  ///< the parent LP objective, strengthened by the objective granularity (minimization form)
+  double parent_objective = 0.0;  ///< the raw LP objective of the parent (pseudocost updates)
   double estimate = 0.0;     ///< estimated objective of the best integer solution below (best-estimate selection)
   std::vector<BoundChange> local;
-  /// Basis of the parent's LP optimum, shared by both children; released once used or when the memory cap is hit.
+  /// Basis of the parent LP optimum, shared by both children; released once used or when the memory cap is hit.
   std::shared_ptr<const BasisSnapshot> basis;
+  int live_children = 0;     ///< children that still exist (not yet released)
+  bool done = false;         ///< processed, pruned or dropped: kept only while descendants need its bound changes
 };
 
-/// Arena of nodes. Ids are assigned in creation order (deterministic) and index the arena.
+/// Arena of nodes with slot reuse. Ids are assigned in creation order and never reused (deterministic); the
+/// storage of a node is released once it is finished and none of its children exist any more, which cascades
+/// towards the root, so the memory is proportional to the nodes still needed (open nodes and their ancestors),
+/// not to the number of nodes ever created.
 class NodeTree {
  public:
   /// Creates the root (id 0) with the given lower bound.
@@ -49,18 +54,36 @@ class NodeTree {
 
   NodeId add_child(NodeId parent, Index col, int dir, double value, double lower_bound, double estimate, BoundChange change,
                    std::shared_ptr<const BasisSnapshot> basis);
-  Node& at(NodeId id) { return nodes_[static_cast<std::size_t>(id)]; }
-  const Node& at(NodeId id) const { return nodes_[static_cast<std::size_t>(id)]; }
-  std::size_t size() const { return nodes_.size(); }
+  Node& at(NodeId id) { return slots_[static_cast<std::size_t>(slot_of_[static_cast<std::size_t>(id)])]; }
+  const Node& at(NodeId id) const { return slots_[static_cast<std::size_t>(slot_of_[static_cast<std::size_t>(id)])]; }
+  /// Whether the node still exists (has not been released).
+  bool alive(NodeId id) const { return id >= 0 && static_cast<std::size_t>(id) < slot_of_.size() && slot_of_[static_cast<std::size_t>(id)] >= 0; }
+  /// Nodes ever created, and nodes whose storage exists now.
+  std::size_t created() const { return slot_of_.size(); }
+  std::size_t live() const { return slots_.size() - free_.size(); }
+  /// The largest number of nodes that existed at the same time.
+  std::size_t peak_live() const { return peak_live_; }
+  /// Number of slots allocated (the size of the arena).
+  std::size_t capacity() const { return slots_.size(); }
   Index max_depth() const { return max_depth_; }
 
-  /// Bounds of the node's subproblem: `lo`/`hi` start as the root bounds and are tightened along the path
-  /// from the root. Returns false if some column's bounds cross (the node is infeasible).
+  /// Marks the node finished (processed, pruned or dropped; its children, if any, were created before this call).
+  /// Its storage is released as soon as it has no live children, and the release cascades to ancestors that are
+  /// finished and have no other live child. The id must not be used afterwards if it was released.
+  void finish(NodeId id);
+
+  /// Bounds of the subproblem of the node: `lo`/`hi` start as the root bounds and are tightened along the path
+  /// from the root. Returns false if the bounds of some column cross (the node is infeasible).
   bool path_bounds(NodeId id, std::vector<double>& lo, std::vector<double>& hi) const;
 
  private:
-  std::vector<Node> nodes_;
+  void release(NodeId id);
+
+  std::vector<Node> slots_;
+  std::vector<std::int32_t> free_;      ///< free slot indices (reused last-in first-out: deterministic)
+  std::vector<std::int32_t> slot_of_;   ///< id -> slot, -1 once released
   Index max_depth_ = 0;
+  std::size_t peak_live_ = 1;
 };
 
 /// The set of open nodes ordered by (lower bound, id): gives the global bound in O(log n).

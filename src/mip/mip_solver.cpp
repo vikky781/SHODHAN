@@ -66,7 +66,8 @@ class Search {
   void apply_bounds();
   LpOutcome solve_node_lp(bool is_root);
   void capture_lp(NodeLp& lp) const;
-  NodeId process(NodeId id, bool plunged);
+  NodeId process(NodeId id, bool plunged);       // process_impl, then the node is released
+  NodeId process_impl(NodeId id, bool plunged);
   void run_heuristics(HeuristicWhen when, NodeId id);
   bool submit(const std::vector<double>& x, const std::string& source);
   void log_progress(bool force);
@@ -107,7 +108,8 @@ class Search {
 
   // counters
   long long nodes_processed_ = 0, pruned_bound_ = 0, pruned_infeasible_ = 0, trouble_nodes_ = 0, lp_integral_ = 0;
-  long long extra_lp_iterations_ = 0, strong_iterations_ = 0, strong_calls_ = 0;
+  long long extra_lp_iterations_ = 0, strong_iterations_ = 0, strong_calls_ = 0, root_iterations_ = 0, cut_iterations_ = 0;
+  double t_cuts_ = 0;
   double dropped_min_ = kInf;
   double t_presolve_ = 0, t_root_ = 0, t_nodes_ = 0, t_strong_ = 0, t_heur_ = 0;
   bool root_lp_infeasible_ = false, root_unbounded_ = false, root_failed_ = false;
@@ -389,8 +391,15 @@ void Search::log_progress(bool force) {
 }
 
 // --------------------------------------------------------------------------------------------------------
-// Processes one node and returns the child to plunge into (or kNoNode).
+// Processes one node and returns the child to plunge into (or kNoNode). The node is released afterwards unless the
+// search stopped inside it (then it stays: its bound is part of the final bound).
 NodeId Search::process(NodeId id, bool plunged) {
+  const NodeId next = process_impl(id, plunged);
+  if (pending_stop_ == Stop::None) tree_.finish(id);
+  return next;
+}
+
+NodeId Search::process_impl(NodeId id, bool plunged) {
   const bool is_root = id == 0;
   current_ = id;
   if (!tree_.path_bounds(id, tlo_ = root_lo_, thi_ = root_hi_)) {
@@ -431,6 +440,7 @@ NodeId Search::process(NodeId id, bool plunged) {
       dropped_min_ = std::min(dropped_min_, tree_.at(id).lower_bound);
       return kNoNode;
     }
+    if (is_root && round == 0) root_iterations_ = engine_->stats().iterations;
     capture_lp(node_lp_);
     const double z = node_lp_.objective;
     // Pseudocost update from the observed gain of the branching that created this node.
@@ -558,10 +568,21 @@ void Search::finalize(MipResult& res, Stop stop, bool preset) {
   // Open nodes that could still improve the incumbent (stale ones are pruned lazily and not counted).
   const double open_threshold = incumbent_min() >= kInf ? kInf : incumbent_min() - 1e-9 * std::max(1.0, std::fabs(incumbent_min()));
   res.nodes_open = static_cast<long long>(open_.count_below(open_threshold)) + (pending_node_ != kNoNode ? 1 : 0);
-  res.lp_iterations = (engine_ ? engine_->stats().iterations : 0) + extra_lp_iterations_;
+  const long long engine_iterations = engine_ ? engine_->stats().iterations : 0;
+  res.lp_iterations = engine_iterations + extra_lp_iterations_;
+  res.root_lp_iterations = root_iterations_;
+  res.node_lp_iterations = engine_iterations - root_iterations_ - cut_iterations_;
+  res.diving_iterations = extra_lp_iterations_;
+  res.cut_lp_iterations = cut_iterations_;
+  res.seconds_cuts = t_cuts_;
+  for (const HeuristicStats& h : hstats_) {
+    if (h.name.rfind("diving", 0) == 0) res.seconds_diving += h.seconds;
+  }
   res.strong_branching_iterations = strong_iterations_;
   res.strong_branching_calls = strong_calls_;
   res.max_depth = tree_.max_depth();
+  res.nodes_created = static_cast<long long>(tree_.created());
+  res.peak_live_nodes = static_cast<long long>(tree_.peak_live());
   res.numerical_trouble_nodes = trouble_nodes_;
   res.nodes_pruned_by_bound = pruned_bound_;
   res.nodes_pruned_infeasible = pruned_infeasible_;
@@ -696,6 +717,7 @@ MipResult Search::run() {
       open_.erase(id, tree_.at(id).lower_bound);
       if (prune(tree_.at(id).lower_bound)) {
         ++pruned_bound_;
+        tree_.finish(id);
         continue;
       }
     }

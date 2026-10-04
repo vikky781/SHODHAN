@@ -39,7 +39,7 @@ LpModel small_mip() {
 
 TEST_CASE(node_tree_reconstructs_bounds_along_the_path_and_ids_are_deterministic) {
   NodeTree tree(-10.0);
-  CHECK_EQ(tree.size(), 1u);
+  CHECK_EQ(tree.created(), 1u);
   const NodeId a = tree.add_child(0, 2, -1, 0.5, -9.0, -8.0, BoundChange{2, 0.0, 0.0}, nullptr);
   const NodeId b = tree.add_child(0, 2, +1, 0.5, -9.0, -8.5, BoundChange{2, 1.0, 1.0}, nullptr);
   const NodeId c = tree.add_child(a, 1, +1, 0.3, -8.0, -7.0, BoundChange{1, 1.0, 5.0}, nullptr);
@@ -178,4 +178,60 @@ TEST_CASE(plugin_registry_creates_plugins_by_name) {
   CHECK_EQ(sel->pop(), 7);
   CHECK_EQ(sel->pop(), kNoNode);
   CHECK(reg.selectors.make("other") == nullptr);
+}
+
+TEST_CASE(node_tree_releases_finished_nodes_and_reuses_slots_without_reusing_ids) {
+  NodeTree tree(-10.0);
+  const NodeId a = tree.add_child(0, 1, -1, 0.5, -9.0, -9.0, BoundChange{1, 0.0, 0.0}, nullptr);
+  const NodeId b = tree.add_child(0, 1, +1, 0.5, -9.0, -9.0, BoundChange{1, 1.0, 1.0}, nullptr);
+  const NodeId c = tree.add_child(a, 2, -1, 0.5, -8.0, -8.0, BoundChange{2, 0.0, 0.0}, nullptr);
+  CHECK_EQ(tree.created(), 4u);
+  CHECK_EQ(tree.live(), 4u);
+  // The root is finished once its children exist, but it stays while they do.
+  tree.finish(0);
+  CHECK(tree.alive(0));
+  // a is finished but has the live child c: kept (c needs its bound change).
+  tree.finish(a);
+  CHECK(tree.alive(a));
+  std::vector<double> lo = {0, 0, 0}, hi = {9, 9, 9};
+  CHECK(tree.path_bounds(c, lo, hi));
+  CHECK_EQ(hi[1], 0.0);  // the change of the finished ancestor a is still applied
+  // Finishing the leaf c releases it and then a (its parent, already finished), but not the root (b is alive).
+  tree.finish(c);
+  CHECK(!tree.alive(c));
+  CHECK(!tree.alive(a));
+  CHECK(tree.alive(0));
+  CHECK_EQ(tree.live(), 2u);
+  // Finishing b releases it and then the root.
+  tree.finish(b);
+  CHECK(!tree.alive(b));
+  CHECK(!tree.alive(0));
+  CHECK_EQ(tree.live(), 0u);
+  CHECK_EQ(tree.created(), 4u);
+}
+
+TEST_CASE(node_tree_slot_reuse_keeps_ids_increasing_and_bounds_memory) {
+  NodeTree tree(0.0);
+  // Many short-lived leaves under one root: each is finished (pruned) at once, so its slot is reused.
+  for (int k = 1; k <= 1000; ++k) {
+    const NodeId child = tree.add_child(0, 0, +1, 0.5, 0.0, 0.0, BoundChange{0, static_cast<double>(k), 5000.0}, nullptr);
+    CHECK_EQ(child, static_cast<NodeId>(k));  // ids are creation order, never reused
+    tree.finish(child);
+    CHECK(!tree.alive(child));
+  }
+  CHECK_EQ(tree.created(), 1001u);
+  CHECK_EQ(tree.live(), 1u);  // only the root
+  CHECK(tree.capacity() <= 2u);  // the arena never needed more than the root and one leaf
+  CHECK(tree.peak_live() <= 2u);
+  // A deep chain keeps every ancestor alive (descendants need their bound changes) until the leaf is finished.
+  NodeId parent = 0;
+  for (int k = 0; k < 50; ++k) {
+    const NodeId child = tree.add_child(parent, 1, +1, 0.5, 0.0, 0.0, BoundChange{1, static_cast<double>(k), 5000.0}, nullptr);
+    tree.finish(parent);
+    parent = child;
+  }
+  CHECK(tree.live() >= 50u);
+  tree.finish(parent);
+  tree.finish(0);
+  CHECK_EQ(tree.live(), 0u);
 }

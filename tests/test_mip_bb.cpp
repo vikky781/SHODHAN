@@ -11,6 +11,7 @@
 #include "shodhan/mip/mip_solver.hpp"
 #include "support/mip_families.hpp"
 #include "support/mip_oracle.hpp"
+#include "support/rng.hpp"
 #include "test_harness.hpp"
 
 using namespace shodhan;
@@ -292,4 +293,44 @@ TEST_CASE(dense_branch_and_bound_oracle_agrees_with_brute_force_enumeration) {
   }
   std::cout << "    dense branch-and-bound oracle vs brute force: " << compared << " instances compared\n";
   CHECK(compared > 80);
+}
+
+TEST_CASE(search_releases_finished_nodes) {
+  const LpModel m = [] {
+    // 30-item knapsack with 3 rows (the same family as the generator in bench/gen_mip.py): needs many nodes.
+    Rng r(11);
+    LpModel k;
+    k.n_rows = 3;
+    k.n_cols = 30;
+    std::vector<Triplet> t;
+    std::vector<double> cap(3, 0.0);
+    for (int j = 0; j < 30; ++j) {
+      double wsum = 0;
+      for (int i = 0; i < 3; ++i) {
+        const int w = r.range(10, 99);
+        t.push_back({i, j, static_cast<double>(w)});
+        cap[static_cast<std::size_t>(i)] += w;
+        wsum += w;
+      }
+      k.col_cost.push_back(-std::floor(wsum / 3) - r.range(-10, 10));
+      k.col_lower.push_back(0.0);
+      k.col_upper.push_back(1.0);
+      k.col_type.push_back(ColType::Binary);
+    }
+    std::string err;
+    SparseMatrix::from_triplets(3, 30, t, &k.A, &err);
+    for (int i = 0; i < 3; ++i) {
+      k.row_lower.push_back(-kInf);
+      k.row_upper.push_back(std::floor(0.4 * cap[static_cast<std::size_t>(i)]));
+    }
+    return k;
+  }();
+  MipOptions o = exact_options();
+  o.heuristics = false;
+  o.node_select = NodeSelectKind::DepthFirst;  // best-bound search keeps a large open set by nature; depth first does not
+  const MipResult r = MipSolver(o).solve(m);
+  CHECK(r.status == Status::Optimal);
+  std::cout << "    node memory (depth first): " << r.nodes_created << " nodes created, at most " << r.peak_live_nodes << " alive at the same time\n";
+  CHECK(r.nodes_created > 50);
+  CHECK(r.peak_live_nodes * 2 < r.nodes_created);
 }
