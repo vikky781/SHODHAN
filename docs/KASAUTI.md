@@ -36,7 +36,7 @@ Exit codes: `0` PASS, `1` FAIL, `2` INCONCLUSIVE (status `other`, unsupported or
 | `PASS_OPTIMAL_TOL` | the strict dual bound was `-infinity` because of tiny wrong-signed multipliers; a bound after dropping them agrees with the objective. **Tolerance-checked, not a proof.** |
 | `PASS_INFEASIBLE`, `PASS_INFEASIBLE_TOL` | disjoint intervals, exactly / after dropping tiny coefficients |
 | `PASS_UNBOUNDED`, `PASS_UNBOUNDED_TOL` | feasible point and improving recession direction, exactly / within tolerance |
-| `PASS_FEASIBLE` | feasibility and integrality only; optimality not certified |
+| `PASS_FEASIBLE` | a MILP result: feasibility, exact integrality and the exact objective; any claimed bound is reported as "bound NOT verified"; optimality not certified |
 | `FAIL` | a check failed, the hash does not match, or the certificate is malformed |
 
 A verdict is called rigorous only if it has no `_TOL` suffix, was computed in exact mode, and (for optimal and
@@ -74,17 +74,24 @@ All of this runs under `ctest` (and the Python parts under `python -m unittest d
   to `4 * 2^-52` times the larger of rhs and range is allowed, because C++ rounds `rhs + |range|` in double). Result: 300 identical, 0 mismatches. It found
   a real KASAUTI bug (a fixed-format number longer than the field was silently truncated).
 - **Corpus integration test**: 426 seeded LPs (60 per family: degenerate, free variables, ranged rows, boxed,
-  wide coefficients, infeasible, unbounded, plus 6 special models) are written to MPS, read back, solved by the
-  full pipeline, and each certificate is verified in exact and in float mode. Result: all 426 pass in both
-  modes and the two modes agree on all 426; 120 are rigorous and 306 are tolerance-checked. The attempts field
-  shows 291 certificates from the first configuration and 135 from the second: exactly the 60 infeasible and 75
-  unbounded models, because presolve cannot certify those statuses in its reduced model and the solver repeats
-  them without presolve to obtain a certificate in the original space.
+  wide coefficients, infeasible, unbounded, plus 6 special models) and 150 seeded MILPs (15 per family, see
+  [MIP.md](MIP.md); every fifth stopped by a node limit of 2) are written to MPS, read back, solved by the full
+  pipeline, and each certificate is verified in exact and in float mode. Result: 576 certificates; the 546 that are
+  expected to pass pass in both modes, the 30 that certify nothing (a MILP infeasible by branching, a MILP with an
+  unbounded relaxation, a node-limited run without an incumbent) are INCONCLUSIVE in both modes, and the two modes
+  agree on all 576. 237 passes are rigorous (for a MILP: feasibility and integrality exact; optimality is never
+  claimed) and 309 are tolerance-checked. The attempts field shows 291 LP certificates from the first configuration
+  and 135 from the second (exactly the 60 infeasible and 75 unbounded LPs, because presolve cannot certify those
+  statuses in its reduced model) and 150 `branch-and-bound` entries.
 - **Mutation tests**: valid certificates are corrupted (x, y, Farkas multipliers, ray, point, claimed objective,
   hash, row count, status), and an oracle written independently of the checker (plain `Fraction` code) classifies
   each mutation as harmful (violation or gap of at least `1e-4` relative, a destroyed proof), benign (at most
-  `1e-8`) or gray. Result: 1724 of 1724 harmful mutations rejected; 416 benign mutations accepted, none rejected;
-  114 gray-zone mutations skipped (they depend on the verifier's tolerances).
+  `1e-8`) or gray. For MILP certificates the mutations break integrality (240), a row or bound (177 harmful), the
+  claimed objective (80), the claimed bound (80) and claim certified optimality (80). Result: 2378 of 2378 harmful
+  mutations rejected; 565 benign mutations accepted, none rejected; 112 gray-zone mutations skipped (they depend on
+  the verifier's tolerances). One mutation that looked harmful was not: relabelling a feasible certificate as
+  `optimal` passed once because that point really is LP-optimal with zero multipliers (a true claim); the status
+  mutation now relabels to `unbounded`, which a feasible certificate can never satisfy.
 
 ## Adjudication of disputed LPs
 
@@ -119,7 +126,8 @@ best-effort with an iteration cap, ends with a wrong-signed multiplier of 2.8e-8
 ## Limits
 
 - Exact mode is used up to 200000 nonzeros; above that the float mode is not a proof.
-- Only LP certificates are verified. MILP optimality is out of scope (a `feasible` certificate is reserved).
+- LP optimality, infeasibility and unboundedness are proved. For a MILP only feasibility, integrality and the objective
+  value are verified; its optimality (the bound) is out of scope and is reported as not verified.
 - Unsupported MPS input (sections the verifier does not implement, semi-continuous bounds, bounds that make
   the model ill-posed such as an infinite `FX`) gives `INCONCLUSIVE`, never a pass.
 - The verifier checks the model file as bytes (SHA-256) and as parsed by its own reader; it cannot know that the

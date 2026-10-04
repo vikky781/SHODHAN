@@ -7,7 +7,8 @@ models, describe them, scale them, and presolve LPs and MIPs with a postsolve
 that recovers primal and dual solutions. It also has the sparse LU factorization
 of simplex bases (with FTRAN/BTRAN and the Forrest-Tomlin update) that a simplex
 solver sits on. LPs can now be solved end to end (presolve, scaling, dual simplex with a primal
-cleanup, KKT check on the original model); integer models are not solved yet. Every LP result can be
+cleanup, KKT check on the original model), and MILPs by branch and bound with reliability branching and primal
+heuristics (tested on small generated instances only). Every LP result can be
 written as a certificate and checked by KASAUTI, an independent verifier in standard-library Python
 that works in exact arithmetic.
 
@@ -63,6 +64,9 @@ shodhan info  model.mps    # summary: size, types, bounds, scaling indicator
 shodhan presolve model.mps [--write-presolved out.mps] [--no-dual-needed] [--mip]
 shodhan solve model.mps [--no-presolve] [--no-scaling] [--no-perturb] [--time-limit s]
                            [--iter-limit n] [--write-sol path] [--write-cert path] [--verbose]
+                           [--mip-gap g] [--mip-abs-gap g] [--node-limit n] [--seed s]
+                           [--branching reliability|pseudocost|mostfrac|first]
+                           [--node-select bestbound|depth|bestestimate] [--heuristics on|off]
 shodhan dump-model model.mps   # canonical text of the parsed model (compares readers)
 shodhan factor-bench model.mps [--threshold u] [--max-updates k]
 shodhan --help
@@ -73,16 +77,19 @@ shodhan --version
 coefficient ratio before and after scaling, and the time taken.
 
 `solve` runs presolve and scaling, then the dual simplex with a primal cleanup, and prints the statistics and
-the result. `--write-cert` also writes a certificate (see below). Models with integer columns are reported as
-`NotImplemented` (exit code 2). Nothing is faked.
+the result. `--write-cert` also writes a certificate (see below). Models with integer columns are solved by branch
+and bound ([docs/MIP.md](docs/MIP.md)): the output has the status, objective, best bound, gap, nodes, LP iterations, time
+and which heuristics found solutions; every reported solution was verified against the original model. A quadratic
+objective is reported as `NotImplemented` (exit code 2). Nothing is faked.
 
 `factor-bench` builds a crash basis (structural columns in ascending nonzero-count order, logical
 columns substituted for any rank deficiency), factorizes it, prints the sizes, fill and pivot counts, runs
 50 random solves with sparse right-hand sides (counts per hypersparse/dense path and residuals) and a short
 Forrest-Tomlin run. It is a developer diagnostic, not a benchmark, and says nothing about solver performance.
 
-Exit codes: 0 ok (optimal for `solve`), 1 usage, read or write error, 2 not implemented, 3 `solve` ended
-infeasible, unbounded, at a limit or numerically. `solve` reports `Optimal` only after the KKT check on the
+Exit codes: 0 ok (optimal for `solve`, for a MILP within the gap), 1 usage, read or write error, 2 not implemented, 3
+`solve` ended infeasible, unbounded or numerically (an LP at a limit too), 4 a MILP stopped at its time or node limit (the
+output says whether an incumbent exists). `solve` reports `Optimal` only after the KKT check on the
 original model passed, and `Infeasible`/`Unbounded` only with a verified certificate.
 
 ## Certificates and the independent verifier
@@ -132,16 +139,20 @@ certificate passes in exact and in float mode, 120 of them rigorously and 306 to
 | `shodhan info`, `shodhan presolve`                   | implemented         |
 | `shodhan factor-bench` (developer diagnostic for the LU) | implemented     |
 | LP dual simplex (bound flipping, Harris, steepest edge, perturbation, phase 1, primal cleanup), Farkas and ray certificates | implemented; tested on generated models only |
-| `shodhan solve`                                      | LPs: full pipeline; integer models: `NotImplemented` |
+| `shodhan solve`                                      | LPs: full pipeline; MILPs: branch and bound; quadratic objectives: `NotImplemented` |
 | Certificates (`--write-cert`): own SHA-256, own JSON writer, optimal / infeasible / unbounded bodies | implemented |
 | Weak-duality bound of the multipliers in the LP acceptance check, with a `rigorous` flag | implemented |
 | KASAUTI verifier (`verify/`, standard-library Python, exact `Fraction` and float modes) | implemented; tested on generated models only |
 | `shodhan dump-model` (differential test of the MPS readers) | implemented |
 | Opt-in stress harness (`SHODHAN_BUILD_STRESS`, not part of ctest) | implemented |
-| `bench/run_lp_set.py`                                | implemented; no Netlib files were available, so nothing real was run |
+| `bench/run_set.py` (LPs and MILPs; `run_lp_set.py` is a wrapper), `bench/gen_mip.py` | implemented; no Netlib or MIPLIB files were available, so nothing real was run |
 | QPS files (QUADOBJ / QMATRIX)                        | not yet implemented |
 | LP solver (interior point)                           | not yet implemented |
-| MILP branch-and-bound                                | not yet implemented |
+| MILP branch and bound: node tree, best-bound/depth/best-estimate selection with plunging, objective-integrality pruning | implemented; tested on small generated instances only |
+| Branching: most fractional, first index, pseudocost, reliability (strong branching on engine copies) | implemented |
+| Primal heuristics: trivial, simple rounding, fractional and coefficient diving, Feasibility Jump | implemented |
+| MILP certificates (feasible point, exact integrality; the bound is claimed, not verified) | implemented |
+| Cutting planes, restarts, MIP presolve beyond step 2, multithreading | not yet implemented |
 | Convex QP                                            | not yet implemented |
 | GPU acceleration                                     | not yet implemented |
 

@@ -39,7 +39,7 @@ that SHODHAN can read. SHODHAN does not include the expander: compile `emps` you
 into `data/raw/netlib/`, then run
 
 ```sh
-python bench/run_lp_set.py data/raw/netlib --exe build/release/shodhan --timeout 300 --csv netlib.csv
+python bench/run_set.py data/raw/netlib --exe build/release/shodhan --timeout 300 --csv netlib.csv
 ```
 
 To compare objectives, give a reference CSV with columns `name,objective` taken from a source you trust

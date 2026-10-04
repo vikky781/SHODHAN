@@ -1,7 +1,7 @@
 # Solution certificates
 
 A certificate is a JSON file that lets a program with no access to any solver internals check a claim
-about an LP: it is optimal, infeasible or unbounded (or, reserved for MILP, feasible). The checker
+about an LP: it is optimal, infeasible or unbounded (or, for a MILP result, a feasible point whose objective is claimed but not proved optimal). The checker
 reads the ORIGINAL model file and the certificate and nothing else. `shodhan solve model.mps --write-cert
 cert.json` writes one; KASAUTI (`verify/kasauti/`, see [KASAUTI.md](KASAUTI.md)) verifies it.
 
@@ -40,8 +40,17 @@ integers. A value that is not finite is never written.
 - **`infeasible`**: `farkas`: `{y: {row name: multiplier}}`.
 - **`unbounded`**: `point` (a primal feasible `x0`, nonzeros only) and `ray` (column name to value, nonzeros
   only). Both are required: a ray alone proves nothing without a feasible point.
-- **`feasible`** (reserved for MILP): `x` only. The verifier checks feasibility and integrality and says that
-  optimality is not certified.
+- **`feasible`** (MILP results, see [MIP.md](MIP.md)): `x` (integer columns exactly integral, written as the
+  integers the solver snapped them to), `claimed_objective`, optionally `claimed_best_bound`, `claimed_gap`
+  (relative) and `claimed_gap_abs`, `nodes`, `mip_status` (the solver's own status, for example `NodeLimit`) and
+  the explicit field `optimality_certified: false`. The verifier checks primal feasibility (relative `primal_tol`),
+  that every integer column is **exactly** integral, and the exact objective against `claimed_objective`. The claimed
+  bound is only reported ("bound NOT verified"); a bound on the wrong side of the objective, or any claim of
+  `optimality_certified: true`, makes the certificate fail. A time- or node-limited run with an incumbent is written
+  the same way.
+- **`infeasible`** for a MILP: with `farkas` when the LP relaxation itself is infeasible (verified as above); otherwise
+  with `certified: false` and no body (infeasibility was proved by branching or presolve): the verifier reports it as
+  INCONCLUSIVE, exit code 2, never as a pass.
 - **`other`**: no body (the solver ended with `NumericalError`, a limit, ...). A certificate with status
   `other` certifies nothing and a verifier must report it as inconclusive.
 
@@ -136,10 +145,13 @@ computes; a row or column condition counts as satisfied if its violation is with
 of its terms (default `1e-9`), and the report states whether every condition held exactly (rigorous) or only
 within tolerance.
 
-### Feasible (reserved)
+### Feasible (MILP results)
 
-Feasibility within tolerance, integrality violation of every column listed as integer in the file, exact objective.
-The verdict is `PASS_FEASIBLE` together with the line "optimality not certified".
+Feasibility within `primal_tol` (relative form above), integrality of every column listed as integer in the file
+(**exactly** integral: the solver snaps them), and the exact objective compared with `claimed_objective`. A claimed best
+bound and gap are printed as "bound NOT verified". The verdict is `PASS_FEASIBLE` together with the line "optimality not
+certified"; it is called rigorous only if the point is exactly feasible and the arithmetic exact, and even then it says
+nothing about optimality.
 
 ### Solution files
 
