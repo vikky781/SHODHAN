@@ -67,6 +67,45 @@ Status to_lp_status(EngineStatus s) {
   return Status::NumericalError;
 }
 
+// A feasible point of the model for an unbounded certificate. The point the primal simplex stops at is feasible
+// only within the engine's scaled primal tolerance; unscaling can amplify that on rows with large scale factors
+// beyond what the certificate check accepts. So the point is recomputed by a feasibility solve (zero costs) with a
+// much tighter primal tolerance, warm-started from the basis at which the ray was found. Empty on failure.
+std::vector<double> tight_feasible_point(const LpModel& model, SimplexOptions so, const BasisSnapshot* basis) {
+  LpModel f = model;
+  std::fill(f.col_cost.begin(), f.col_cost.end(), 0.0);
+  f.objective_offset = 0.0;
+  so.primal_tol = 1e-10;
+  so.final_check = false;
+  SimplexEngine e(f, so);
+  if (basis != nullptr && !e.set_basis(*basis)) return {};
+  if (e.solve() != EngineStatus::Optimal) return {};
+  return std::vector<double>(e.primal_all().begin(), e.primal_all().begin() + model.n_cols);
+}
+
+// Cleans an unbounded ray: scales it to unit infinity norm and zeroes small entries. A ray from the simplex can
+// have entries of size 1e10 next to rounding noise of size 1e-17 in components that are really zero, or small
+// spurious components next to the real ones; on a row where such a component is the only term it breaks a
+// recession-cone condition by a relative amount of 1. Thresholds from 1e-12 up to 1e-6 of the largest entry are
+// tried; the first cleaned ray that passes the check at the stricter tolerance 1e-9 is used (it is then also an
+// improving direction), otherwise the first that passes at 1e-7, otherwise the ray as it was.
+std::vector<double> cleaned_ray(const LpModel& model, const std::vector<double>& ray) {
+  double mx = 0.0;
+  for (const double v : ray) mx = std::max(mx, std::fabs(v));
+  if (!(mx > 0.0)) return ray;
+  std::vector<double> loose;
+  for (const double threshold : {1e-12, 1e-10, 1e-8, 1e-6}) {
+    std::vector<double> c(ray.size());
+    for (std::size_t j = 0; j < ray.size(); ++j) {
+      const double v = ray[j] / mx;
+      c[j] = std::fabs(v) <= threshold ? 0.0 : v;
+    }
+    if (check_unbounded_ray(model, c, 1e-9).ok) return c;
+    if (loose.empty() && check_unbounded_ray(model, c, 1e-7).ok) loose = c;
+  }
+  return loose.empty() ? ray : loose;
+}
+
 // `tight` multiplies the tolerances (1 = as given, 0.01 = a hundred times tighter).
 Attempt run_attempt(const LpModel& model, const LpOptions& opt, bool use_presolve, bool use_scaling, double tight,
                     double time_left) {
@@ -178,6 +217,20 @@ Attempt run_attempt(const LpModel& model, const LpOptions& opt, bool use_presolv
         for (std::size_t j = 0; j < r.size(); ++j) r[j] *= sc.col_scale[j];
         for (std::size_t j = 0; j < pt.size(); ++j) pt[j] *= sc.col_scale[j];
       }
+      if (max_relative_violation(model, pt) > opt.kkt_tol) {
+        // Candidates: a feasibility solve from the basis of the ray, and one from the slack basis (a different,
+        // often better conditioned vertex). The most accurate one is kept.
+        const BasisSnapshot snap = engine.get_basis_snapshot();
+        for (const BasisSnapshot* start : {&snap, static_cast<const BasisSnapshot*>(nullptr)}) {
+          std::vector<double> better = tight_feasible_point(*eng_model, so, start);
+          if (better.empty()) continue;
+          if (use_scaling) {
+            for (std::size_t j = 0; j < better.size(); ++j) better[j] *= sc.col_scale[j];
+          }
+          if (max_relative_violation(model, better) < max_relative_violation(model, pt)) pt = better;
+        }
+      }
+      r = cleaned_ray(model, r);
       a.verified = check_unbounded_ray(model, r, 1e-7).ok && max_relative_violation(model, pt) <= opt.kkt_tol;
       a.ray = r;
       a.point = pt;

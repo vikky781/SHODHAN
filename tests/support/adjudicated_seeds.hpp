@@ -29,7 +29,7 @@ inline constexpr AdjudicatedSeed kAdjudicatedWideSeeds[] = {
     {450835, 0, -9.3281250009935022, 1e-9, true},
     {453961, 0, 20.123667009608404, 1e-8, true},
     {451287, 1, 0.0, 0.0, true},   // unbounded; certified since the point is taken from a fresh factorization
-    {450165, 1, 0.0, 0.0, false},  // unbounded; the engine's point is infeasible by 2e-6 relative: NumericalError
+    {450165, 1, 0.0, 0.0, true},   // unbounded; point from a tight feasibility solve, ray cleaned of noise
     // Found on seeds 1..2000 when the dual-bound acceptance check was added (open findings, see docs/KASAUTI.md):
     {433, 0, 7.4272773546400339, 4e-6, true},  // polishing leaves a multiplier of 2.8e-8 on an infinite bound
     {1999, 2, 0.0, 0.0, false},                // exactly infeasible by far less than any tolerance; reported Optimal within tolerance
