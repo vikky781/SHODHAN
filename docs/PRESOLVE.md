@@ -126,6 +126,54 @@ When `is_mip` is set only reductions that preserve integer-feasible points are u
 
 Duals are not reconstructed for a MIP (`need_duals` is ignored); postsolve returns only `x` and the objective.
 
+## MIP presolve (`is_mip`)
+
+After the standard passes, up to `mip_rounds` (default 5) rounds of the reductions below run, each followed by the
+standard passes again, until nothing changes. They need only primal postsolve (`need_duals` is not used). Every one
+keeps all integer-feasible points, except dominated-column fixing, which keeps at least one optimal point.
+References: Achterberg, Bixby, Gu, Rothberg, Weninger (2020), *Presolve reductions in mixed integer
+programming*; Savelsbergh (1994), *Preprocessing and probing techniques for mixed integer programming problems*;
+Atamturk, Nemhauser, Savelsbergh (2000), *Conflict graphs in solving integer programming problems*.
+
+- **Bound propagation to a fixpoint** (`mip_propagation`). Row activity bounds give column bounds (queue of rows,
+  work limit `propagation_work_limit` entries). Integer bounds are rounded outwards with the same tolerance the
+  standard passes use, so rounding noise can only weaken a bound. Only integer bounds are written to the model;
+  continuous bounds are used internally for further deductions. A conflict (activity range cannot meet the row, or
+  lower > upper) proves infeasibility. No postsolve action.
+- **Coefficient tightening** (`coefficient_tightening`). For a row with one finite side, `sum a x <= b`, and a binary
+  `x_j` with `a_j > 0` whose removal makes the row redundant (`d = b - (maxact - a_j) > 0`): `a_j -= d`, `b -= d`;
+  for `a_j < 0` with `d = b - maxact - a_j > 0`: `a_j += d`. The set of integer-feasible points is unchanged and
+  the LP relaxation gets tighter. Skipped when `d` is below `1e-6 max(1,|a_j|)` or the new coefficient would be
+  tiny. No postsolve action.
+- **Probing** (`probing`, `probing_column_limit` columns, `probing_work_limit`). Each binary column is fixed to 0 and
+  to 1 and propagated on a trail that is undone afterwards. One branch infeasible: the column is fixed to the other
+  value. Both feasible: integer bounds common to both branches are tightened; remaining one-sided results are
+  stored as implications `x_j = v => x_k <= u` (or `>= l`), up to `max_implications`.
+- **Parallel rows** (`parallel_rows`). Rows with the same column set and coefficients proportional within a
+  relative `1e-13` are merged: the intersection of the (rescaled) ranges is kept, the other row is removed. An empty
+  intersection is left to the infeasibility checks of the standard passes.
+- **Duplicate columns** (`duplicate_columns`). Identical columns with the same type and cost, finite lower bounds
+  and (for integers) integral bounds are merged into `z = x_j + x_k` with bounds `[l_j + l_k, u_j + u_k]`.
+  Postsolve (`DuplicateColumnRecord`): `x_j = max(l_j, z - u_k)` clamped to `u_j`, `x_k = z - x_j`.
+- **Dominated columns.** Identical columns with `c_j < c_k`, `u_j = +inf` and finite `l_k` of the same type: `x_k` is
+  fixed at `l_k` (excess over `l_k` can always move to `x_j` without raising the cost). Optimal-preserving only.
+- **Clique table** (`clique_table`, `max_cliques`). From each row side `sum w_l l <= b'` over binary literals
+  (complemented literals for negative coefficients, other columns at their minimum activity), the largest set whose
+  two smallest weights already exceed `b'` is a clique; implications `a => b` give the clique `{a, not b}`. A literal
+  is `2 j` for `x_j` and `2 j + 1` for `1 - x_j`. Returned in `PresolveResult::mip` with the implications, mapped to
+  the reduced model; columns that were merged are excluded because their meaning changed.
+
+Statistics (`PresolveStats`): `propagated_bounds`, `coefficients_tightened`, `probing_fixings`, `probing_bounds`,
+`implications`, `cliques`, `parallel_rows`, `duplicate_columns`, `dominated_columns`, `mip_work`.
+
+Tests (`tests/test_presolve_mip.cpp`): 1200 seeded small MIPs built from set packing, big-M links, loose knapsacks,
+parallel rows, duplicate and dominated columns and implication chains. For every seed: the optimum of the reduced
+model equals brute force on the ORIGINAL model, the postsolved optimum is feasible in the original with the same
+objective, presolve never reports infeasible for a feasible model, the branch and bound with presolve agrees, and each
+MIP reduction on its own (all other reductions off) passes the same check. Cliques and implications are checked on every
+feasible integer point of each enumerable reduced model. Each reduction must fire on at least 25 models or the test
+prints `INCONCLUSIVE` for it. `SHODHAN_MIP_SEED_COUNT` widens the range.
+
 ## Tolerances
 
 - `feasibility_tol` (default `1e-9`) is relative.
