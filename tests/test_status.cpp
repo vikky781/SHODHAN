@@ -14,6 +14,7 @@ TEST_CASE(status_names_are_stable) {
   CHECK_EQ(std::string(to_string(Status::TimeLimit)), "TimeLimit");
   CHECK_EQ(std::string(to_string(Status::IterationLimit)), "IterationLimit");
   CHECK_EQ(std::string(to_string(Status::NumericalError)), "NumericalError");
+  CHECK_EQ(std::string(to_string(Status::NodeLimit)), "NodeLimit");
   CHECK_EQ(std::string(to_string(Status::Interrupted)), "Interrupted");
   CHECK_EQ(std::string(to_string(Status::NotImplemented)), "NotImplemented");
   CHECK_EQ(std::string(to_string(Status::ReadError)), "ReadError");

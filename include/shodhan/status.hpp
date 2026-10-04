@@ -10,6 +10,7 @@ enum class Status {
   InfeasibleOrUnbounded,
   TimeLimit,
   IterationLimit,
+  NodeLimit,  ///< branch and bound stopped at its node limit (see docs/MIP.md)
   NumericalError,
   Interrupted,
   NotImplemented,
