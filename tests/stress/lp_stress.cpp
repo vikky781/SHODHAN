@@ -108,7 +108,8 @@ int main(int argc, char** argv) {
         // Decided by exact arithmetic (tests/support/adjudicated_seeds.hpp): compare with that, not with the oracle.
         if (adj->exact_status == 0) {
           const double rel = std::fabs(r.solution.objective - adj->exact_objective) / (1.0 + std::fabs(adj->exact_objective));
-          if (r.status != Status::Optimal || !(rel <= adj->max_rel_error)) why = "differs from the exact answer";
+          const bool honest_failure = r.status == Status::NumericalError && !adj->pipeline_certifies;
+          if (!honest_failure && (r.status != Status::Optimal || !(rel <= adj->max_rel_error))) why = "differs from the exact answer";
         } else if (adj->exact_status == 2) {
           if (r.status == Status::Unbounded) why = "differs from the exact answer (infeasible)";
         } else if (r.status != Status::Unbounded && !(r.status == Status::NumericalError && !adj->pipeline_certifies)) {

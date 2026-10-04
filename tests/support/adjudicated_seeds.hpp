@@ -17,12 +17,15 @@ struct AdjudicatedSeed {
   int exact_status;
   double exact_objective;
   double max_rel_error;
-  bool pipeline_certifies;  // false: the pipeline reports NumericalError (never a wrong answer), see the note
+  // false: the pipeline may report NumericalError (an honest failure, never a wrong answer); if it reports
+  // Optimal or Unbounded the result must still match the exact one. The outcome of such a seed depends on
+  // floating-point details of the platform (fused multiply-add, library rounding).
+  bool pipeline_certifies;
 };
 
 inline constexpr AdjudicatedSeed kAdjudicatedWideSeeds[] = {
     {453507, 0, -18266017920876808.0, 1e-15, true},  // the oracle said Unbounded: the oracle was wrong
-    {450741, 0, -11.437507350760493, 1e-5, true},    // sum|y| about 6e9: conditioning limit of double precision
+    {450741, 0, -11.437507350760493, 1e-5, false},   // sum|y| about 6e9: Optimal on x86-64, NumericalError on Apple arm64
     {450835, 0, -9.3281250009935022, 1e-9, true},
     {453961, 0, 20.123667009608404, 1e-8, true},
     {451287, 1, 0.0, 0.0, true},   // unbounded; certified since the point is taken from a fresh factorization

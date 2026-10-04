@@ -60,7 +60,7 @@ jobs:
           set +e +o pipefail
           {
             echo "--- compiler errors (first 40) ---"
-            grep -E "error|Error|FAILED" build.log 2>/dev/null | head -40
+            grep -E "error|Error|FAILED|warning C|warning:|see reference to|see declaration" build.log 2>/dev/null | grep -v "Node.js" | head -60
             echo "--- failing tests ---"
             grep -E "Failed|FAIL|CHECK FAILED|FAILING|Exception|rror" test.log 2>/dev/null | head -60
             echo "--- tail of the test log ---"

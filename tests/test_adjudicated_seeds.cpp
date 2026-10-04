@@ -20,7 +20,12 @@ TEST_CASE(pipeline_agrees_with_exact_arithmetic_on_adjudicated_seeds) {
     const LpResult r = LpSolver().solve(model);
     std::cout << "    wide seed " << s.seed << ": " << to_string(r.status) << "\n";
     if (s.exact_status == 0) {
-      CHECK(r.status == Status::Optimal);
+      if (!s.pipeline_certifies) {
+        // Platform-sensitive (hypersensitive) seed: an honest NumericalError is acceptable, a wrong answer is not.
+        CHECK(r.status == Status::Optimal || r.status == Status::NumericalError);
+      } else {
+        CHECK(r.status == Status::Optimal);
+      }
       if (r.status != Status::Optimal) continue;
       const double rel = std::fabs(r.solution.objective - s.exact_objective) / (1.0 + std::fabs(s.exact_objective));
       CHECK(rel <= s.max_rel_error);
