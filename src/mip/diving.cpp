@@ -47,9 +47,15 @@ class DivingHeuristic final : public PrimalHeuristic {
       locks_ = compute_locks(m);
       locks_ready_ = true;
     }
-    auto cur = std::make_unique<SimplexEngine>(*s.engine);
+    // The dive runs on the search's own engine inside a probe guard that restores it on return; the saved state
+    // for the single backtrack costs a few vector copies instead of a copy of the engine.
+    SimplexEngine* cur = s.engine;
+    const bool saved_check = cur->options().final_check, saved_polish = cur->options().polish;
     cur->options().final_check = false;
-    std::unique_ptr<SimplexEngine> backup;  // the state before the last decision
+    cur->options().polish = false;
+    EngineProbe whole(*cur);
+    EngineState backup;  // the state before the last decision
+    bool have_backup = false;
     struct Decision {
       Index col;
       bool went_down;
@@ -58,7 +64,7 @@ class DivingHeuristic final : public PrimalHeuristic {
     bool have_last = false;
     Decision last{0, true, 0.0};
     bool backtracked = false;
-    const long long start_iters = cur->stats().iterations;
+    const long long start_iters = cur->stats().iterations;  // == whole's start; whole.iterations() is not used because a backtrack restores the count
     long long wasted = 0;  // iterations of a failed branch that a backtrack discarded
     auto spent_so_far = [&]() { return cur->stats().iterations - start_iters + wasted; };
     std::vector<double> x(to_size(m.n_cols));
@@ -105,19 +111,20 @@ class DivingHeuristic final : public PrimalHeuristic {
       const double nlo = down ? lo : std::ceil(v);
       const double nhi = down ? std::floor(v) : hi;
       if (nlo > nhi) break;
-      backup = std::make_unique<SimplexEngine>(*cur);
+      backup = cur->save_state();
+      have_backup = true;
       cur->change_col_bounds(pick, nlo, nhi);
       have_last = true;
       last = {pick, down, v};
       long long remaining = budget - spent_so_far();
       if (remaining <= 0) break;
       EngineStatus st = cur->solve_limited(remaining);
-      if (st == EngineStatus::Infeasible && !backtracked && backup) {
+      if (st == EngineStatus::Infeasible && !backtracked && have_backup) {
         // one backtrack: the other side of the last decision, from the state before it
         backtracked = true;
-        const long long failed = cur->stats().iterations - backup->stats().iterations;
+        const long long failed = cur->stats().iterations - backup.stats.iterations;
         wasted += failed;
-        cur = std::move(backup);
+        cur->restore_state(backup);
         const double lo2 = cur->col_lower(last.col), hi2 = cur->col_upper(last.col);
         const double nlo2 = last.went_down ? std::ceil(last.value) : lo2;
         const double nhi2 = last.went_down ? hi2 : std::floor(last.value);
@@ -151,10 +158,12 @@ class DivingHeuristic final : public PrimalHeuristic {
       }
     }
     (void)have_last;
-    const long long spent = cur ? spent_so_far() : 0;
+    const long long spent = spent_so_far();
     used_ += spent;
     s.add_iterations(spent, false);
-  }
+    cur->options().final_check = saved_check;
+    cur->options().polish = saved_polish;
+  }  // `whole` restores the engine state here
 
  private:
   DiveKind kind_;

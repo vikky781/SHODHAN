@@ -117,7 +117,11 @@ EngineStatus SimplexEngine::finish_after_dual() {
 EngineStatus SimplexEngine::phase2() {
   if (opt_.perturb && opt_.perturb_at_start) perturb_costs(1.0);
   EngineStatus st = run_dual_simplex();
-  if (st == EngineStatus::Optimal) st = finish_after_dual();
+  if (st == EngineStatus::Optimal) {
+    const auto t = std::chrono::steady_clock::now();
+    st = finish_after_dual();
+    if (opt_.profile) stats_.profile.finish += std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
+  }
   return st;
 }
 
@@ -312,6 +316,7 @@ EngineStatus SimplexEngine::solve_limited(long long max_iterations) {
 
 EngineStatus SimplexEngine::solve() {
   t0_ = std::chrono::steady_clock::now();
+  const auto prof0 = t0_;
   cost_ = cost_orig_;
   costs_modified_ = false;
   EngineStatus st;
@@ -322,6 +327,7 @@ EngineStatus SimplexEngine::solve() {
     compute_dual();
     const Index remaining = fix_dual_infeasibilities(false);
     if (primal_stale_) compute_primal();
+    if (opt_.profile) stats_.profile.setup += std::chrono::duration<double>(std::chrono::steady_clock::now() - prof0).count();
     if (remaining > 0) {
       bool dual_feasible = false;
       st = run_dual_phase1(&dual_feasible);
@@ -329,7 +335,9 @@ EngineStatus SimplexEngine::solve() {
     } else {
       st = phase2();
     }
+    const auto prof1 = std::chrono::steady_clock::now();
     st = accept(st);
+    if (opt_.profile) stats_.profile.accept += std::chrono::duration<double>(std::chrono::steady_clock::now() - prof1).count();
   }
   stats_.seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_).count();
   return st;

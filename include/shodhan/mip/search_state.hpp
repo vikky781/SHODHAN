@@ -44,12 +44,12 @@ struct NodeLp {
   std::vector<Index> fractional;   ///< integer columns farther than int_tol from an integer
 };
 
-/// What plugins see of the search. The main engine is exposed read-only: plugins that need to change an LP
-/// (strong branching, diving) work on a COPY of the engine, so the search state is untouched by construction.
+/// What plugins see of the search. The main engine is exposed mutably so that probes (strong branching, diving)
+/// need no copy of it, but a plugin must leave it exactly as it found it: wrap every probe in an EngineProbe.
 struct SearchState {
   const LpModel* model = nullptr;       ///< presolved model, unscaled, minimization
   const Scaling* scaling = nullptr;     ///< column scales (integer columns have scale 1)
-  const SimplexEngine* engine = nullptr;
+  SimplexEngine* engine = nullptr;  ///< plugins that change it (strong branching, diving) must restore it: use EngineProbe
   const MipOptions* options = nullptr;
   const NodeTree* tree = nullptr;
   NodeId node = kNoNode;

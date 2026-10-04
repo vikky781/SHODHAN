@@ -6,8 +6,8 @@
 // are measured by strong branching (a short dual simplex solve of both children) instead of estimated. The
 // candidate score is the product max(gain_down, eps) * max(gain_up, eps).
 //
-// Strong branching works on COPIES of the engine: the search state is read-only here, so it cannot be
-// disturbed, and a node LP that the probe changes is simply discarded with the copy.
+// Strong branching probes the search's own engine inside an EngineProbe guard, which restores the engine state
+// exactly when the probe ends (a test compares the state before and after, bit for bit).
 
 #include <algorithm>
 #include <cmath>
@@ -139,23 +139,37 @@ class ReliabilityRule final : public BranchingRule {
       if (nlo > nhi) {
         cut = true;
       } else {
-        SimplexEngine probe = *s.engine;  // a copy: the search's engine is untouched
+        // A probe on the search's own engine: the guard restores the state on scope exit (cheap vector copies, no
+        // copy of the matrix or the factorization), so the search is undisturbed.
+        SimplexEngine& probe = *s.engine;
+        const bool saved_check = probe.options().final_check, saved_polish = probe.options().polish;
         probe.options().final_check = false;
-        const long long before = probe.stats().iterations;
-        probe.change_col_bounds(col, nlo, nhi);
-        const EngineStatus st = probe.solve_limited(opt.strong_iteration_limit);
-        s.add_iterations(probe.stats().iterations - before, true);
+        probe.options().polish = false;  // a probe needs the bound, not a polished vertex
+        EngineStatus st;
+        double dual_estimate = 0.0, probe_objective = 0.0;
+        long long spent = 0;
+        {
+          EngineProbe guard(probe);
+          probe.change_col_bounds(col, nlo, nhi);
+          st = probe.solve_limited(opt.strong_iteration_limit);
+          dual_estimate = probe.current_dual_objective();
+          probe_objective = probe.objective();
+          spent = guard.iterations();
+        }
+        probe.options().final_check = saved_check;
+        probe.options().polish = saved_polish;
+        s.add_iterations(spent, true);
         s.count_strong_solve();
         if (st == EngineStatus::Infeasible) {
           cut = true;
         } else if (st == EngineStatus::Optimal) {
-          obj = probe.objective() / s.obj_scale;
+          obj = probe_objective / s.obj_scale;
           exact = true;
           gain = std::max(0.0, obj - z);
           if (cutoff < kInf && obj >= cutoff - 1e-9 * std::max(1.0, std::fabs(cutoff))) cut = true;
         } else {
           // Iteration limit or trouble: the dual objective reached so far is an estimate of the gain.
-          gain = std::max(0.0, probe.current_dual_objective() / s.obj_scale - z);
+          gain = std::max(0.0, dual_estimate / s.obj_scale - z);
         }
       }
       if (dir < 0) {

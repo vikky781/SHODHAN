@@ -146,6 +146,61 @@ bool SimplexEngine::set_basis(const std::vector<Index>& basis) {
   return ok;
 }
 
+EngineState SimplexEngine::save_state() const {
+  EngineState s;
+  s.lo = lo_;
+  s.hi = hi_;
+  s.cost = cost_;
+  s.x = x_;
+  s.d = d_;
+  s.y = y_;
+  s.weights = weights_;
+  s.basis = basis_;
+  s.pos = pos_;
+  s.status = status_;
+  s.weights_exact = weights_exact_;
+  s.costs_modified = costs_modified_;
+  s.primal_stale = primal_stale_;
+  s.bounds_modified = bounds_modified_;
+  s.stats = stats_;
+  s.dual_objective = dual_objective_;
+  s.best_dual_objective = best_dual_objective_;
+  s.flip_objective = flip_objective_;
+  s.last_progress_iter = last_progress_iter_;
+  s.stall_rounds = stall_rounds_;
+  s.trouble_run = trouble_run_;
+  s.last_leaving = last_leaving_;
+  return s;
+}
+
+void SimplexEngine::restore_state(const EngineState& s) {
+  lo_ = s.lo;
+  hi_ = s.hi;
+  cost_ = s.cost;
+  x_ = s.x;
+  d_ = s.d;
+  y_ = s.y;
+  weights_ = s.weights;
+  basis_ = s.basis;
+  pos_ = s.pos;
+  status_ = s.status;
+  weights_exact_ = s.weights_exact;
+  costs_modified_ = s.costs_modified;
+  primal_stale_ = s.primal_stale;
+  bounds_modified_ = s.bounds_modified;
+  stats_ = s.stats;
+  dual_objective_ = s.dual_objective;
+  best_dual_objective_ = s.best_dual_objective;
+  flip_objective_ = s.flip_objective;
+  last_progress_iter_ = s.last_progress_iter;
+  stall_rounds_ = s.stall_rounds;
+  trouble_run_ = s.trouble_run;
+  last_leaving_ = s.last_leaving;
+  banned_.clear();
+  updates_since_refactor_ = 0;
+  factor_valid_ = false;  // rebuilt on first use
+}
+
 BasisSnapshot SimplexEngine::get_basis_snapshot() const {
   BasisSnapshot s;
   s.status.resize(to_size(N_));
@@ -208,6 +263,7 @@ bool SimplexEngine::refactor(bool reset_weights) {
   }
   if (st != FactorStatus::Ok) return false;
   updates_since_refactor_ = 0;
+  factor_valid_ = true;
   ++stats_.refactors;
   if (reset_weights || repaired) {
     std::fill(weights_.begin(), weights_.end(), 1.0);
@@ -217,6 +273,7 @@ bool SimplexEngine::refactor(bool reset_weights) {
 }
 
 void SimplexEngine::compute_primal() {
+  if (!factor_valid_) refactor();
   rhs_.clear();
   for (Index j = 0; j < N_; ++j) {
     if (status_[to_size(j)] == VarStatus::Basic) continue;
@@ -236,6 +293,7 @@ void SimplexEngine::compute_primal() {
 }
 
 void SimplexEngine::compute_dual() {
+  if (!factor_valid_) refactor();
   rhs_.clear();
   for (Index p = 0; p < m_; ++p) {
     const double c = cost_[to_size(basis_[to_size(p)])];

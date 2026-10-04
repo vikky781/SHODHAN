@@ -70,6 +70,7 @@ struct SimplexOptions {
   int max_trouble = 6;             ///< consecutive numerical-trouble events before NumericalError (target)
   int max_cleanup_rounds = 5;      ///< perturbation-removal / primal cleanup attempts (target)
   double artificial_bound = 1000.0;  ///< dual phase 1: box for free variables (target)
+  bool profile = false;            ///< accumulate the time spent in the parts of the dual simplex (SimplexStats::profile)
   bool final_check = true;         ///< check_kkt on the final point (can be disabled by branch and bound)
   double final_tol = 1e-6;         ///< tolerance of the final KKT check
 
@@ -85,7 +86,24 @@ struct BasisSnapshot {
   friend bool operator==(const BasisSnapshot&, const BasisSnapshot&) = default;
 };
 
+/// Seconds spent in the parts of a solve, filled when SimplexOptions::profile is set (simple timers, no profiler).
+struct SimplexProfile {
+  double setup = 0.0;            ///< solve(): refactor, primal and dual values, dual feasibility fix
+  double choose_row = 0.0;       ///< pricing: leaving row
+  double btran = 0.0;            ///< row of B^-1
+  double pivot_row = 0.0;        ///< the pivot row over the nonbasic columns
+  double select_entering = 0.0;  ///< ratio test
+  double ftran_column = 0.0;     ///< entering column
+  double ftran_tau = 0.0;        ///< steepest-edge vector and weight update
+  double updates = 0.0;          ///< dual and primal value updates
+  double factor_update = 0.0;    ///< Forrest-Tomlin update
+  double refactor = 0.0;         ///< refactorizations during iterations
+  double finish = 0.0;           ///< perturbation removal, cleanup and polishing after the dual simplex
+  double accept = 0.0;           ///< iterative refinement and the final KKT check
+};
+
 struct SimplexStats {
+  SimplexProfile profile;
   long long iterations = 0;        ///< all simplex iterations
   long long dual_iterations = 0;
   long long phase1_iterations = 0; ///< dual phase 1 iterations (counted in dual_iterations too)
@@ -112,6 +130,23 @@ struct InfeasibilitySummary {
   Index dual_count = 0;
 };
 
+/// Everything a probe can change: bound changes followed by dual simplex iterations (strong branching, diving).
+/// Saving it costs a few vector copies of size N (no matrix, no factorization), so a probe needs no copy of the
+/// engine. The factorization is NOT saved: after restore_state() the basis is back but the factorization is
+/// marked stale and is rebuilt on first use (solve() always refactorizes first, so a following solve() is
+/// identical, bit for bit, to one on an engine that never probed).
+struct EngineState {
+  std::vector<double> lo, hi, cost, x, d, y, weights;
+  std::vector<Index> basis, pos;
+  std::vector<VarStatus> status;
+  bool weights_exact = true, costs_modified = false, primal_stale = false, bounds_modified = false;
+  SimplexStats stats;
+  double dual_objective = 0.0, best_dual_objective = 0.0, flip_objective = 0.0;
+  long long last_progress_iter = 0;
+  int stall_rounds = 0, trouble_run = 0;
+  Index last_leaving = -1;
+};
+
 /// Bounded dual simplex (with a primal simplex for cleanup) on the computational
 /// form  A x - r = 0, variables 0..n-1 structural and n..n+m-1 logical (column
 /// -e_i). The model is minimized internally (a Maximize model has its costs
@@ -126,6 +161,14 @@ class SimplexEngine {
   /// Solves from the current basis (the slack basis at construction). May be
   /// called again after change_col_bounds / change_row_bounds.
   EngineStatus solve();
+
+  // ---- probes ---------------------------------------------------------
+  /// The state that a probe can change (see EngineState).
+  EngineState save_state() const;
+  /// Puts the saved state back; the factorization is rebuilt lazily.
+  void restore_state(const EngineState& state);
+  /// False after restore_state() until the next refactorization.
+  bool factor_valid() const { return factor_valid_; }
 
   // ---- warm start ------------------------------------------------------
   /// Solves like solve() but stops with IterationLimit after at most `max_iterations` further iterations.
@@ -263,6 +306,7 @@ class SimplexEngine {
   bool weights_exact_ = true;
   bool costs_modified_ = false;
   bool primal_stale_ = false;  ///< nonbasic values changed since compute_primal()
+  bool factor_valid_ = true;   ///< false after restore_state(): the factorization does not match the basis
 
   SimplexStats stats_;
   int trouble_run_ = 0;
@@ -292,6 +336,23 @@ class SimplexEngine {
   long long last_progress_iter_ = 0;
   int stall_rounds_ = 0;
   Index last_leaving_ = -1;
+};
+
+/// RAII probe: saves the engine state on construction and restores it on destruction. Whatever the probe does
+/// (change_col_bounds, solve_limited, ...) is undone; iterations() reports what it spent before the restore.
+class EngineProbe {
+ public:
+  explicit EngineProbe(SimplexEngine& engine) : engine_(engine), saved_(engine.save_state()), start_iterations_(engine.stats().iterations) {}
+  ~EngineProbe() { engine_.restore_state(saved_); }
+  EngineProbe(const EngineProbe&) = delete;
+  EngineProbe& operator=(const EngineProbe&) = delete;
+  /// Simplex iterations spent inside the probe so far.
+  long long iterations() const { return engine_.stats().iterations - start_iterations_; }
+
+ private:
+  SimplexEngine& engine_;
+  EngineState saved_;
+  long long start_iterations_;
 };
 
 }  // namespace shodhan

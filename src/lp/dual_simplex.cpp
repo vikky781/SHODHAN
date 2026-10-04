@@ -13,6 +13,7 @@
 // a free one whenever alpha_j != 0; fixed variables never block.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 
@@ -227,6 +228,7 @@ bool SimplexEngine::refactor_and_recompute() {
 }
 
 void SimplexEngine::compute_exact_weights() {
+  if (!factor_valid_) refactor();
   for (Index i = 0; i < m_; ++i) {
     rho_.clear();
     rho_.set(i, 1.0);
@@ -251,6 +253,25 @@ void SimplexEngine::update_weights(Index r, double alpha_r) {
   weights_[to_size(r)] = std::max(wr / (alpha_r * alpha_r), 1e-4);
 }
 
+namespace {
+// Adds the elapsed time of its scope to `acc` when profiling is on.
+double now_seconds() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+
+class ProfTimer {
+ public:
+  ProfTimer(bool on, double& acc) : acc_(on ? &acc : nullptr), t0_(on ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}) {}
+  ~ProfTimer() {
+    if (acc_ != nullptr) *acc_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_).count();
+  }
+  ProfTimer(const ProfTimer&) = delete;
+  ProfTimer& operator=(const ProfTimer&) = delete;
+
+ private:
+  double* acc_;
+  std::chrono::steady_clock::time_point t0_;
+};
+}  // namespace
+
 EngineStatus SimplexEngine::run_dual_simplex() {
   trouble_run_ = 0;
   banned_.clear();
@@ -265,7 +286,11 @@ EngineStatus SimplexEngine::run_dual_simplex() {
       if (!refactor_and_recompute()) return EngineStatus::NumericalError;
     }
 
-    Index r = choose_leaving_row(nullptr);
+    Index r;
+    {
+      ProfTimer pt(opt_.profile, stats_.profile.choose_row);
+      r = choose_leaving_row(nullptr);
+    }
     if (r < 0) {
       // Before declaring optimality, make sure the point is not a product of
       // accumulated update error.
@@ -288,15 +313,25 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     }
     double delta = xp - bound;
 
-    rho_.clear();
-    rho_.set(r, 1.0);
-    factor_.btran(rho_);
-    compute_pivot_row();
+    {
+      ProfTimer pt(opt_.profile, stats_.profile.btran);
+      rho_.clear();
+      rho_.set(r, 1.0);
+      factor_.btran(rho_);
+    }
+    {
+      ProfTimer pt(opt_.profile, stats_.profile.pivot_row);
+      compute_pivot_row();
+    }
 
     double theta = 0.0;
     Index q = -1;
     const double margin = 0.5 * ptol(bound);
-    bool found = select_entering(sigma, delta, margin, false, &theta, &q, &flips_);
+    bool found;
+    {
+      ProfTimer pt(opt_.profile, stats_.profile.select_entering);
+      found = select_entering(sigma, delta, margin, false, &theta, &q, &flips_);
+    }
     if (!found) {
       if (updates_since_refactor_ > 0) {  // verify with a fresh factorization first
         if (!refactor_and_recompute()) return EngineStatus::NumericalError;
@@ -314,8 +349,11 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     if (!found) return EngineStatus::Infeasible;
 
     // Entering column (spike saved for the update) and the pivot check.
-    load_column(model_.A, n_, q, col_);
-    factor_.ftran(col_, true);
+    {
+      ProfTimer pt(opt_.profile, stats_.profile.ftran_column);
+      load_column(model_.A, n_, q, col_);
+      factor_.ftran(col_, true);
+    }
     const double alpha_c = col_[r];
     const double alpha_r = row_alpha_[q];
     const double scale = std::max(std::fabs(alpha_c), std::fabs(alpha_r));
@@ -330,9 +368,11 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     }
 
     if (opt_.dual_steepest_edge) {
+      ProfTimer pt(opt_.profile, stats_.profile.ftran_tau);
       tau_.assign(rho_);
       factor_.ftran(tau_, false);
     }
+    const double t_upd = opt_.profile ? now_seconds() : 0.0;
     if (!flips_.empty()) apply_bound_flips(flips_, &delta, r);
 
     // Dual update. Flipped variables have just moved to their other bound; the step carries
@@ -396,10 +436,14 @@ EngineStatus SimplexEngine::run_dual_simplex() {
     banned_.clear();
     trouble_run_ = 0;
 
-    if (factor_.update(r) == FactorStatus::Ok) {
-      ++updates_since_refactor_;
-    } else if (!refactor_and_recompute()) {
-      return EngineStatus::NumericalError;
+    if (opt_.profile) stats_.profile.updates += now_seconds() - t_upd;
+    {
+      ProfTimer pt(opt_.profile, stats_.profile.factor_update);
+      if (factor_.update(r) == FactorStatus::Ok) {
+        ++updates_since_refactor_;
+      } else if (!refactor_and_recompute()) {
+        return EngineStatus::NumericalError;
+      }
     }
     // Stall detection: no progress of the dual objective for a long time.
     if (dual_objective_ > best_dual_objective_ + 1e-9 * (1.0 + std::fabs(best_dual_objective_))) {
