@@ -16,8 +16,11 @@ Notes:
 - Many Netlib files are distributed in a compressed form that needs the
   `emps` expander published alongside them; decompress them to plain MPS
   before use.
-- MIPLIB instances are `.mps.gz`. Reading them directly needs a build with
-  `-DSHODHAN_ENABLE_ZLIB=ON`; otherwise decompress them first.
+- MIPLIB instances are `.mps.gz`. Reading them directly needs a build with `-DSHODHAN_ENABLE_ZLIB=ON` (zlib is
+  the only optional dependency; CI builds with it and reads `tests/models/tiny_lp.mps.gz`). Without zlib the
+  reader says so and names the helper: `python scripts/gunzip_mps.py FILE.mps.gz` expands one file and
+  `python scripts/gunzip_mps.py DIRECTORY` every `.gz` in a directory, using only the Python standard library.
+  A truncated or corrupted archive is reported and no partial `.mps` is left behind.
 - QPS files (Maros-Meszaros, QPLIB) contain quadratic sections that SHODHAN
   does not read yet; they are rejected with a clear error.
 - These locations are given from memory and were not re-checked when this file

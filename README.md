@@ -127,7 +127,7 @@ certificate passes in exact and in float mode, 120 of them rigorously and 306 to
 | Core types (status, params, logger)                  | implemented         |
 | CSC sparse matrix, LP model container                | implemented         |
 | MPS reader (fixed and free format)                   | implemented         |
-| MPS reader: `.gz` input via optional zlib            | implemented, not exercised by the tests |
+| MPS reader: `.gz` input via optional zlib (`scripts/gunzip_mps.py` without it) | implemented; read in CI with zlib enabled (on a tiny model) |
 | MPS writer (round-trips the models in the tests)     | implemented         |
 | KKT checker (primal/dual feasibility, gap)           | implemented         |
 | Scaling (geometric + equilibration, exact powers of two) | implemented     |

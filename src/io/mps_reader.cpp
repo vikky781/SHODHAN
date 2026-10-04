@@ -823,7 +823,7 @@ bool load_file(const std::string& path, std::string* text, std::string* error) {
     gzclose(f);
     return true;
 #else
-    *error = "gzip input requires building with SHODHAN_ENABLE_ZLIB=ON";
+    *error = "gzip input requires building with SHODHAN_ENABLE_ZLIB=ON; or expand the file first with: python scripts/gunzip_mps.py " + path;
     return false;
 #endif
   }

@@ -129,3 +129,36 @@ jobs:
 
       - name: Dependency guard
         run: python scripts/check_deps.py --build-dir build --verbose
+
+  zlib:
+    name: linux-zlib
+    runs-on: ubuntu-latest
+    env:
+      # The CLI test fails if this build cannot read a .gz model.
+      SHODHAN_EXPECT_ZLIB: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install zlib
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHODHAN_WERROR=ON -DSHODHAN_ENABLE_ZLIB=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Read and solve a gzip-compressed model
+        run: |
+          build/shodhan info tests/models/tiny_lp.mps.gz
+          build/shodhan solve tests/models/tiny_lp.mps.gz | grep "Objective:     94"
+
+      - name: CLI test and unit tests
+        run: ctest --test-dir build -R "shodhan_cli|shodhan_tests" --output-on-failure
+
+      - name: Dependency guard
+        run: python scripts/check_deps.py --build-dir build --verbose

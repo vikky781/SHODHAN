@@ -218,6 +218,34 @@ def main():
         check("solve with an unknown node selection is a usage error (1)", rc == 1 and "unknown node selection" in err, err)
         rc, _, err = run(exe, "solve", knap, "--heuristics", "maybe")
         check("solve --heuristics maybe is a usage error (1)", rc == 1, err)
+    # ---- gzip input: read with zlib when built with it, otherwise a clear error; the helper script always works ----
+    gz = os.path.join(models, "tiny_lp.mps.gz")
+    rc, out, err = run(exe, "info", gz)
+    if rc == 0:
+        check("a .mps.gz model is read (built with zlib)", "TINY_LP" in out and "Rows:           4" in out, out)
+        rc2, out2, _ = run(exe, "solve", gz)
+        check("a .mps.gz model is solved (built with zlib)", rc2 == 0 and "Objective:     94" in out2, out2)
+    else:
+        print("[note] this build has no zlib: the .gz read is not exercised, only the error message")
+        check("without zlib a .gz model is a read error (1) that names the build option and the helper script",
+              rc == 1 and "SHODHAN_ENABLE_ZLIB" in err and "gunzip_mps.py" in err, repr((rc, err)))
+        check("SHODHAN_EXPECT_ZLIB=1 demands a zlib build", os.environ.get("SHODHAN_EXPECT_ZLIB") != "1",
+              "this build was expected to have zlib")
+    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "gunzip_mps.py")
+    with tempfile.TemporaryDirectory() as gd:
+        expanded = os.path.join(gd, "expanded.mps")
+        p = subprocess.run([sys.executable, helper, gz, expanded], capture_output=True, text=True)
+        check("gunzip_mps.py expands a model that then solves", p.returncode == 0 and os.path.exists(expanded), p.stdout + p.stderr)
+        rc3, out3, _ = run(exe, "solve", expanded)
+        check("the expanded model has objective 94", rc3 == 0 and "Objective:     94" in out3, out3)
+        bad = os.path.join(gd, "bad.mps.gz")
+        with open(gz, "rb") as f:
+            data = f.read()
+        with open(bad, "wb") as f:
+            f.write(data[: len(data) // 2])
+        p = subprocess.run([sys.executable, helper, bad], capture_output=True, text=True)
+        check("gunzip_mps.py reports a truncated file and leaves no partial output",
+              p.returncode == 1 and not os.path.exists(os.path.join(gd, "bad.mps")) and not os.path.exists(os.path.join(gd, "bad.mps.part")), p.stdout + p.stderr)
     rc, _, err = run(exe, "solve")
     check("solve without file is a usage error (1)", rc == 1, err)
     rc, _, err = run(exe, "solve", lp, "--time-limit")
