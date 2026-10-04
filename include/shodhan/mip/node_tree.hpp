@@ -70,6 +70,14 @@ class OpenSet {
   void erase(NodeId id, double bound) { set_.erase({bound, id}); }
   bool empty() const { return set_.empty(); }
   std::size_t size() const { return set_.size(); }
+  /// Number of open nodes whose lower bound is below `threshold` (nodes at or above it cannot improve on an incumbent).
+  std::size_t count_below(double threshold) const {
+    std::size_t n = 0;
+    for (const auto& e : set_) {
+      if (e.first < threshold) ++n;
+    }
+    return n;
+  }
   /// Smallest lower bound among the open nodes (kInf when empty).
   double min_bound() const { return set_.empty() ? kInf : set_.begin()->first; }
 

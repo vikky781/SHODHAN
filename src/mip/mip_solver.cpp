@@ -555,7 +555,9 @@ void Search::attach_lp_certificate(MipResult& res) {
 void Search::finalize(MipResult& res, Stop stop, bool preset) {
   const double sense = original_.sense == Sense::Maximize ? -1.0 : 1.0;
   res.nodes_processed = nodes_processed_;
-  res.nodes_open = static_cast<long long>(open_.size()) + (pending_node_ != kNoNode ? 1 : 0);
+  // Open nodes that could still improve the incumbent (stale ones are pruned lazily and not counted).
+  const double open_threshold = incumbent_min() >= kInf ? kInf : incumbent_min() - 1e-9 * std::max(1.0, std::fabs(incumbent_min()));
+  res.nodes_open = static_cast<long long>(open_.count_below(open_threshold)) + (pending_node_ != kNoNode ? 1 : 0);
   res.lp_iterations = (engine_ ? engine_->stats().iterations : 0) + extra_lp_iterations_;
   res.strong_branching_iterations = strong_iterations_;
   res.strong_branching_calls = strong_calls_;
