@@ -40,14 +40,33 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHODHAN_WERROR=ON
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        shell: bash
+        run: cmake --build build --config Release --parallel 2>&1 | tee build.log
 
       - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+        shell: bash
+        run: ctest --test-dir build -C Release --output-on-failure 2>&1 | tee test.log; exit "${PIPESTATUS[0]}"
 
       - name: Dependency guard
         if: runner.os == 'Linux'
         run: python3 scripts/check_deps.py --build-dir build --verbose
+
+      # On failure, put the compiler errors or the failing tests into an annotation, which is visible
+      # without opening the raw log.
+      - name: Failure details
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "--- compiler errors (first 40) ---"
+            grep -E "error|Error|FAILED" build.log 2>/dev/null | head -40
+            echo "--- failing tests ---"
+            grep -E "Failed|FAIL|CHECK FAILED|FAILING|Exception|rror" test.log 2>/dev/null | head -60
+            echo "--- tail of the test log ---"
+            tail -n 25 test.log 2>/dev/null
+          } > failure.txt
+          msg=$(head -c 6000 failure.txt | sed 's/%/%25/g' | tr -d '\r' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=${{ matrix.name }} details::${msg}"
 
   sanitizers:
     name: linux-asan-ubsan
