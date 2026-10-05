@@ -30,6 +30,8 @@ def _build_parser():
                    help="relative size below which coefficients of A^T y are treated as zero if the strict check fails (0 = strict only; default 1e-12)")
     p.add_argument("--dual-zero-tol", type=float, default=1e-9,
                    help="relative size below which a reduced cost or multiplier that meets an infinite bound is treated as zero if the strict dual bound is -infinity (0 = strict only; default 1e-9, the solver accepts 1e-6)")
+    p.add_argument("--pool-tol", type=float, default=1e-6,
+                   help="pooling certificates: largest relative residual of the nonlinear model that is accepted (default 1e-6)")
     p.add_argument("--psd-cap", type=int, default=120,
                    help="largest number of columns for the EXACT test that Q is positive semidefinite (default 120); above it convexity is reported as not verified and the dual bound as not rigorous")
     p.add_argument("--report", help="write a JSON report to this file")
@@ -89,6 +91,10 @@ def verify(model_path, cert_path, args, out=None):
         rep.say("cannot use the certificate: %s" % e)
         rep.detail = "INCONCLUSIVE"
         return 2, rep
+
+    if model_path.lower().endswith(".pool") and cert is not None:
+        from . import pool  # pooling certificates (docs/POOLING.md): a different problem class, a different verifier
+        return pool.verify_pool(model_path, data, sha, cert, args, rep)
 
     # Mode: decide from the size, which is known from a cheap exact-free float parse only for big files;
     # parse in float first when the file is large to count entries.
@@ -202,8 +208,12 @@ def main(argv=None):
         label = "INCONCLUSIVE"
     if code != 0:
         suffix = ""
+    elif label == "PASS_FEASIBLE" and rep.data.get("kind") == "pooling":
+        suffix = "  (nonlinear constraints exactly satisfied; optimality NOT certified)"
     elif label == "PASS_FEASIBLE":
         suffix = "  (feasibility and integrality exact; optimality NOT certified)" if rep.rigorous else "  (feasibility within tolerance; optimality NOT certified)"
+    elif label == "PASS_FEASIBLE_TOL":
+        suffix = "  (nonlinear constraints within the stated tolerance; optimality NOT certified)"
     else:
         suffix = "  (rigorous: exact arithmetic)" if rep.rigorous else "  (tolerance-checked, not a proof: see the lines above)"
     print("VERDICT: " + label + suffix)

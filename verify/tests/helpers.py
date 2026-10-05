@@ -17,7 +17,7 @@ def sha(text):
 
 
 def args(**kw):
-    ns = argparse.Namespace(mode="exact", primal_tol=1e-6, gap_tol=1e-6, ray_tol=1e-9, int_tol=1e-6, farkas_zero_tol=1e-12, dual_zero_tol=1e-9, psd_cap=120,
+    ns = argparse.Namespace(mode="exact", primal_tol=1e-6, gap_tol=1e-6, ray_tol=1e-9, int_tol=1e-6, farkas_zero_tol=1e-12, dual_zero_tol=1e-9, psd_cap=120, pool_tol=1e-6,
                             sol=None, report=None, model=None, certificate=None)
     for k, v in kw.items():
         setattr(ns, k, v)
