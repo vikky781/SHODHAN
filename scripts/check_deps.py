@@ -8,6 +8,8 @@ numerical library:
   2. #include directives in src/ and include/,
   3. the shared libraries linked by built binaries (via ldd or otool -L when
      one of them is available),
+  5. Python scripts (bench/, scripts/, verify/, tests/): no import of a third-party solver or numerical package. The ONE allowed
+     exception is the optional HiGHS reference cross-check (see PYTHON_ALLOW below).
   4. test-only code (tests/support/) leaking into the library: src/ and include/
      must not include it, the CMake definitions of shodhan_core and of the CLI
      must not mention tests/, and the built library must not contain test objects.
@@ -45,6 +47,16 @@ FORBIDDEN_PREFIX = (
 # Names that may carry a version suffix (Eigen3, blas64, ...). Deliberately not
 # amd/clp/cbc/coin: "AMD64" is a processor name, not the AMD ordering library.
 FORBIDDEN_VERSIONED = {"eigen", "highs", "scip", "glpk", "blas", "lapack", "cblas", "openblas"}
+
+# Top-level Python modules that must never be imported by the solver's scripts, the generators or KASAUTI.
+FORBIDDEN_PY_IMPORTS = {
+    "highspy", "scipy", "numpy", "cvxpy", "cvxopt", "pulp", "ortools", "gurobipy", "cplex", "docplex", "mip", "pyomo", "swiglpk", "glpk",
+    "scip", "pyscipopt", "cylp", "cbcpy", "osqp", "ecos", "clarabel", "qpsolvers", "casadi", "sympy", "pandas", "sklearn",
+}
+# The explicit allow-list: file (relative to the repository root) -> modules it may import. bench/refinery/crosscheck_highs.py is an
+# OPTIONAL external reference cross-check (it imports highspy inside a try block and prints "skipped" when it is absent). It is a
+# standalone script: nothing else imports it, and neither the solver, the generators nor KASAUTI may import highspy.
+PYTHON_ALLOW = {"bench/refinery/crosscheck_highs.py": {"highspy"}}
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = {".git", "build", "out", "data", "__pycache__", ".venv", "venv"}
@@ -258,6 +270,25 @@ def check_binaries(build_dirs, verbose, problems):
         print("note: no built binaries found; linked-library check skipped")
 
 
+PY_IMPORT_RE = re.compile(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def check_python_imports(verbose, problems):
+    for sub in ("bench", "scripts", "verify", "tests"):
+        for path in walk(sub):
+            if not path.endswith(".py"):
+                continue
+            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+            allowed = PYTHON_ALLOW.get(rel, set())
+            if verbose:
+                print("checking Python imports: " + rel)
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for lineno, line in enumerate(f, 1):
+                    m = PY_IMPORT_RE.match(line)
+                    if m and m.group(1).lower() in FORBIDDEN_PY_IMPORTS and m.group(1).lower() not in allowed:
+                        problems.append("%s:%d: imports forbidden package '%s'" % (rel, lineno, m.group(1)))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build-dir", action="append", default=None,
@@ -277,6 +308,7 @@ def main():
     check_includes(args.verbose, problems)
     check_binaries(build_dirs, args.verbose, problems)
     check_test_support_isolation(build_dirs, args.verbose, problems)
+    check_python_imports(args.verbose, problems)
 
     if problems:
         print("dependency check FAILED:")
