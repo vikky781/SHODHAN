@@ -38,7 +38,14 @@
         "SHODHAN_CUT_PIPE_SEEDS": "20",
         "SHODHAN_QP_SEEDS": "150",
         "SHODHAN_QP_PIPE_SEEDS": "120",
-        "SHODHAN_LP_AGREE_SEEDS": "30"
+        "SHODHAN_LP_AGREE_SEEDS": "30",
+        "SHODHAN_STRUCT_SEEDS": "100",
+        "SHODHAN_BIGM_SEEDS": "120",
+        "SHODHAN_STRUCT_CUT_SEEDS": "40",
+        "SHODHAN_POOL_SEEDS": "30",
+        "SHODHAN_POOL_LP_SEEDS": "20",
+        "SHODHAN_POOL2_SEEDS": "6",
+        "SHODHAN_POOL_DET_SEEDS": "10"
       }
     }
   ]
