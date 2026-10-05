@@ -168,6 +168,16 @@ Scaling compute_scaling(const LpModel& model, const ScalingOptions& options, Sca
     cmin = cmin == 0.0 ? a : std::min(cmin, a);
     cmax = std::max(cmax, a);
   }
+  // The quadratic term s C Q C enters the objective on the same footing as the costs.
+  for (std::size_t j = 0; j < n; ++j) {
+    for (Index p = model.quadratic.col_start.size() > j + 1 ? model.quadratic.col_start[j] : 0;
+         model.quadratic.col_start.size() > j + 1 && p < model.quadratic.col_start[j + 1]; ++p) {
+      const double a = std::fabs(model.quadratic.value[to_size(p)]) * sc.col_scale[j] * sc.col_scale[to_size(model.quadratic.row_index[to_size(p)])];
+      if (a == 0.0) continue;
+      cmin = cmin == 0.0 ? a : std::min(cmin, a);
+      cmax = std::max(cmax, a);
+    }
+  }
   if (cmax > 0.0) {
     sc.obj_scale = round_pow2(1.0 / std::sqrt(cmin * cmax));
     rep.objective_scaled = sc.obj_scale != 1.0;
@@ -209,6 +219,13 @@ LpModel apply_scaling(const LpModel& model, const Scaling& sc) {
     if (!is_inf(model.row_upper[i])) out.row_upper[i] = sc.row_scale[i] * model.row_upper[i];
   }
   out.objective_offset = sc.obj_scale * model.objective_offset;
+  // Q' = s C Q C (lower triangle, entry (i, j) scaled by s C_i C_j).
+  for (std::size_t j = 0; j < n && model.quadratic.col_start.size() > j + 1; ++j) {
+    for (Index p = model.quadratic.col_start[j]; p < model.quadratic.col_start[j + 1]; ++p) {
+      out.quadratic.value[to_size(p)] =
+          sc.obj_scale * sc.col_scale[to_size(model.quadratic.row_index[to_size(p)])] * model.quadratic.value[to_size(p)] * sc.col_scale[j];
+    }
+  }
   return out;
 }
 
