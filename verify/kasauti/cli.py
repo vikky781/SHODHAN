@@ -30,6 +30,8 @@ def _build_parser():
                    help="relative size below which coefficients of A^T y are treated as zero if the strict check fails (0 = strict only; default 1e-12)")
     p.add_argument("--dual-zero-tol", type=float, default=1e-9,
                    help="relative size below which a reduced cost or multiplier that meets an infinite bound is treated as zero if the strict dual bound is -infinity (0 = strict only; default 1e-9, the solver accepts 1e-6)")
+    p.add_argument("--psd-cap", type=int, default=120,
+                   help="largest number of columns for the EXACT test that Q is positive semidefinite (default 120); above it convexity is reported as not verified and the dual bound as not rigorous")
     p.add_argument("--report", help="write a JSON report to this file")
     p.add_argument("--version", action="version", version="kasauti " + __version__)
     return p
@@ -57,7 +59,7 @@ def verify(model_path, cert_path, args, out=None):
     """Runs the verification and returns (exit code, Report). ``out`` receives the text."""
     emit = out or (lambda s: print(s))
     rep = checks.Report()
-    opt = checks.Options(args.primal_tol, args.gap_tol, args.ray_tol, args.int_tol, args.farkas_zero_tol, getattr(args, "dual_zero_tol", 1e-9))
+    opt = checks.Options(args.primal_tol, args.gap_tol, args.ray_tol, args.int_tol, args.farkas_zero_tol, getattr(args, "dual_zero_tol", 1e-9), getattr(args, "psd_cap", 120))
 
     try:
         data = read_bytes(model_path)
@@ -118,6 +120,8 @@ def verify(model_path, cert_path, args, out=None):
     rep.data.update({"mode": mode, "model": model_path, "model_sha256": sha})
     rep.say("model: %s, %d rows, %d columns, %d nonzeros, %d integer, sense %s; mode %s" %
             (model.name or "(unnamed)", model.n_rows, model.n_cols, model.nnz, model.n_integer, model.sense, mode))
+    if model.quad:
+        rep.say("quadratic term: %d nonzeros in the lower triangle of Q" % model.n_quad)
     for w in model.warnings:
         rep.say("parser warning: %s" % w)
 
@@ -134,6 +138,10 @@ def verify(model_path, cert_path, args, out=None):
             for key, have in (("rows", model.n_rows), ("cols", model.n_cols), ("sense", model.sense), ("n_integer", model.n_integer)):
                 if prob.get(key) != have:
                     ident.append("%s: certificate says %r, the file has %r" % (key, prob.get(key), have))
+            if "quadratic" in prob and bool(prob["quadratic"]) != bool(model.quad):
+                ident.append("quadratic: certificate says %r, the file has %s a quadratic term" % (prob["quadratic"], "a" if model.quad else "no"))
+            if "q_nnz" in prob and prob["q_nnz"] != model.n_quad:
+                ident.append("q_nnz: certificate says %r, the file has %d stored entries of Q" % (prob["q_nnz"], model.n_quad))
             for line in ident:
                 rep.say("problem mismatch: " + line)
             rep.check("problem_identity", not ident)

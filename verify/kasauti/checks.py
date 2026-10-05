@@ -14,13 +14,14 @@ INCONCLUSIVE = "INCONCLUSIVE"
 
 
 class Options:
-    def __init__(self, primal_tol=1e-6, gap_tol=1e-6, ray_tol=1e-9, int_tol=1e-6, farkas_zero_tol=1e-12, dual_zero_tol=1e-9):
+    def __init__(self, primal_tol=1e-6, gap_tol=1e-6, ray_tol=1e-9, int_tol=1e-6, farkas_zero_tol=1e-12, dual_zero_tol=1e-9, psd_cap=120):
         self.primal_tol = primal_tol
         self.gap_tol = gap_tol
         self.ray_tol = ray_tol
         self.int_tol = int_tol
         self.farkas_zero_tol = farkas_zero_tol
         self.dual_zero_tol = dual_zero_tol
+        self.psd_cap = psd_cap  # largest order of Q for which positive semidefiniteness is verified exactly
 
 
 class Report:
@@ -146,6 +147,74 @@ def _sense_sign(model):
     return -1 if model.sense == "max" else 1
 
 
+def quad_apply(model, ar, x):
+    """(Q' x, (1/2) x^T Q' x) for the quadratic term in the minimization form Q' = sgn Q (docs/QP.md): the model stores the
+    lower triangle of Q; an entry q_ij with i != j stands for q_ij and q_ji."""
+    n = model.n_cols
+    qx = [[] for _ in range(n)]
+    sgn = _sense_sign(model)
+    for (i, j), v in model.quad.items():
+        q = sgn * ar.num(v)
+        qx[i].append(q * x[j])
+        if i != j:
+            qx[j].append(q * x[i])
+    out = [ar.total(t) for t in qx]
+    half = ar.total([x[j] * out[j] for j in range(n) if out[j] != 0]) / 2
+    return out, half
+
+
+def primal_objective(model, ar, x):
+    """Objective in the minimization form: offset + c^T x + (1/2) x^T Q x."""
+    c, offset = internal_costs(model, ar)
+    obj = offset + ar.total([c[j] * x[j] for j in range(model.n_cols) if x[j] != 0])
+    if model.quad:
+        obj += quad_apply(model, ar, x)[1]
+    return obj
+
+
+def check_psd(model, ar, opt):
+    """Is Q' (minimization form) positive semidefinite? Returns (status, detail): "psd", "not_psd", "not_verified".
+
+    Symmetric elimination without pivoting on the full matrix: in exact arithmetic every pivot of a positive semidefinite
+    matrix is >= 0 and a zero pivot forces the rest of its row to be zero, so a negative pivot, or a zero pivot with a
+    nonzero entry in its row, proves that Q is NOT positive semidefinite, and finishing without one proves that it is.
+    The exact test is run only up to opt.psd_cap columns (Fractions grow quickly); above that, and in float mode, the
+    answer is "not_verified" (float mode runs the same elimination with a tolerance, which is evidence, not a proof)."""
+    if not model.quad:
+        return "psd", "no quadratic term"
+    n = model.n_cols
+    sgn = _sense_sign(model)
+    if n > opt.psd_cap:
+        return "not_verified", "Q has %d columns, above the cap of %d for the exact test (--psd-cap)" % (n, opt.psd_cap)
+    rows = [dict() for _ in range(n)]
+    for (i, j), v in model.quad.items():
+        val = sgn * ar.num(v)
+        rows[i][j] = val
+        if i != j:
+            rows[j][i] = val
+    scale = max([ar.absval(v) for r in rows for v in r.values()] + [ar.zero])
+    tol = ar.zero if ar.exact else 1e-9 * scale
+    for k in range(n):
+        piv = rows[k].get(k, ar.zero)
+        nbrs = {j: v for j, v in rows[k].items() if j > k and (v != 0 if ar.exact else abs(v) > tol)}
+        if piv < -tol:
+            return "not_psd", "negative pivot %s at column %s" % (fmt(piv), model.col_names[k])
+        if (piv <= tol) if not ar.exact else (piv == 0):
+            if nbrs:
+                j = next(iter(nbrs))
+                return "not_psd", "zero pivot at column %s with a nonzero entry %s in its row (column %s)" % (model.col_names[k], fmt(nbrs[j]), model.col_names[j])
+            continue
+        for i, vi in nbrs.items():
+            for j, vj in nbrs.items():
+                rows[i][j] = rows[i].get(j, ar.zero) - vi * vj / piv
+        for j in nbrs:
+            rows[j].pop(k, None)
+        rows[k] = {}
+    if ar.exact:
+        return "psd", "exact symmetric elimination finished with every pivot >= 0"
+    return "not_verified", "float mode: the elimination found no negative pivot within a relative 1e-9, which is not a proof"
+
+
 def internal_costs(model, ar):
     """Costs and offset of the minimization form (negated for a max model)."""
     s = _sense_sign(model)
@@ -164,10 +233,18 @@ def check_optimal(model, cert, ar, opt, rep):
     rep.say("primal feasibility: max violation %s absolute, %s relative%s" % (fmt(abs_v), fmt(rel_v), (" at " + where) if where else ""))
     rep.check("primal_feasibility", primal_ok, max_abs=abs_v, max_rel=rel_v, tolerance=opt.primal_tol)
 
-    # d = c - A^T y, exactly.
+    # d = c + Q x - A^T y, exactly (Q' of the minimization form; x~ = the certificate's x, see docs/CERTIFICATES.md).
+    qx, quad_half = (quad_apply(model, ar, x) if model.quad else ([ar.zero] * model.n_cols, ar.zero))
+    psd_status, psd_detail = check_psd(model, ar, opt)
+    # Without a verified convex Q the weak-duality bound is not rigorous: the verdict is tolerance-level.
+    convex_unproven = bool(model.quad) and psd_status == "not_verified"
+    if model.quad:
+        rep.say("convexity of Q: %s (%s)" % ({"psd": "positive semidefinite", "not_psd": "NOT positive semidefinite", "not_verified": "NOT verified"}[psd_status], psd_detail))
+        rep.check("q_psd", psd_status != "not_psd", status=psd_status, detail=psd_detail)
+        rep.data["convexity"] = psd_status
     d = []
     for j, col in enumerate(model.col_entries):
-        d.append(c[j] - ar.total([ar.num(a) * y[i] for i, a in col if y[i] != 0]))
+        d.append(c[j] + qx[j] - ar.total([ar.num(a) * y[i] for i, a in col if y[i] != 0]))
     offenders = []  # (name, absolute size, size relative to its scale) of every wrong-signed value on an infinite bound
 
     def dual_bound(drop):
@@ -204,7 +281,7 @@ def check_optimal(model, cert, ar, opt, rep):
             need_lo = d[j] > 0
             bound = model.col_lo[j] if need_lo else model.col_hi[j]
             if bound is None:
-                scale = ar.absval(c[j]) + ar.total([ar.absval(ar.num(a) * y[i]) for i, a in model.col_entries[j] if y[i] != 0])
+                scale = ar.absval(c[j]) + ar.absval(qx[j]) + ar.total([ar.absval(ar.num(a) * y[i]) for i, a in model.col_entries[j] if y[i] != 0])
                 offenders.append(("column %s (d = %s)" % (model.col_names[j], fmt(d[j])), float(ar.absval(d[j])), float(ar.absval(d[j]) / scale)))
                 if drop > 0 and ar.absval(d[j]) <= drop * scale:
                     dropped.append("column %s" % model.col_names[j])
@@ -215,9 +292,9 @@ def check_optimal(model, cert, ar, opt, rep):
                 terms.append(d[j] * ar.num(bound))
         if reason is not None:
             return None, reason, dropped, ar.total(effect)
-        return offset + ar.total(terms), None, dropped, ar.total(effect)
+        return offset - quad_half + ar.total(terms), None, dropped, ar.total(effect)
 
-    primal_obj = offset + ar.total([c[j] * x[j] for j in range(model.n_cols) if x[j] != 0])
+    primal_obj = offset + ar.total([c[j] * x[j] for j in range(model.n_cols) if x[j] != 0]) + quad_half
     obj_model = sgn * primal_obj
     rep.say("primal objective (model sense): %s" % fmt(obj_model))
     claimed = cert.get("claimed_objective")
@@ -287,7 +364,9 @@ def check_optimal(model, cert, ar, opt, rep):
     consistent = True
     if isinstance(claim, dict) and "rigorous" in claim:
         strict_ok = lb is not None and not tolerant
-        if claim["rigorous"] is True and not strict_ok and not ar.exact:
+        if convex_unproven and claim["rigorous"] is True:
+            rep.say("the certificate claims a rigorous dual bound but convexity of Q could not be verified here")
+        elif claim["rigorous"] is True and not strict_ok and not ar.exact:
             rep.say("the certificate claims a rigorous dual bound; float mode cannot judge that claim (use exact mode)")
         elif claim["rigorous"] is True and not strict_ok:
             consistent = False
@@ -296,7 +375,12 @@ def check_optimal(model, cert, ar, opt, rep):
             rep.say("the certificate's claim about its dual bound (rigorous: %s) is %s" % (
                 claim["rigorous"], "consistent with the exact strict bound" if claim["rigorous"] == strict_ok else "weaker than the exact strict result (a claim is not evidence)"))
         rep.check("claimed_rigorous_consistent", consistent, claimed=claim["rigorous"], strict_bound_exists=strict_ok)
-    ok = primal_ok and gap_ok and claim_ok and consistent
+    if model.quad and psd_status == "not_psd":
+        rep.say("Q is not positive semidefinite: the weak-duality bound does not hold and the point can be at most a KKT point, not a proven optimum")
+    if convex_unproven:
+        tolerant = True
+        rep.say("convexity of Q is not verified: the dual bound is NOT rigorous")
+    ok = primal_ok and gap_ok and claim_ok and consistent and not (model.quad and psd_status == "not_psd")
     rep.data.update({"primal_objective": _jsonable(obj_model), "dual_bound": _jsonable(lb_model), "max_primal_violation": _jsonable(abs_v)})
     if ok:
         rep.detail = "PASS_OPTIMAL_TOL" if tolerant else "PASS_OPTIMAL"
@@ -403,6 +487,8 @@ def check_infeasible(model, cert, ar, opt, rep):
 
 # --------------------------------------------------------------------------------------------
 def check_unbounded(model, cert, ar, opt, rep):
+    if model.quad:
+        raise Inconclusive("unbounded certificates for a quadratic objective are not supported (the ray would also have to satisfy r^T Q r = 0 and Q r = 0 along improving directions)")
     x0 = _vector(ar, cert.get("point", {}), model.col_index, "column")
     r = _vector(ar, cert.get("ray", {}), model.col_index, "column")
     if "point" not in cert or "ray" not in cert:
@@ -497,8 +583,7 @@ def check_feasible(model, cert, ar, opt, rep):
     int_ok = worst_int == 0  # the solver snaps integer columns: exactly integral is required
     rep.say("integrality: largest distance from an integer %s over %d integer column(s) (must be exactly 0)" % (fmt(worst_int), model.n_integer))
     rep.check("integrality", int_ok, max_deviation=worst_int)
-    c, offset = internal_costs(model, ar)
-    obj = _sense_sign(model) * (offset + ar.total([c[j] * x[j] for j in range(model.n_cols) if x[j] != 0]))
+    obj = _sense_sign(model) * primal_objective(model, ar, x)
     rep.say("exact objective (model sense): %s" % fmt(obj))
     rep.data["primal_objective"] = _jsonable(obj)
     ok = feas_ok and int_ok
@@ -549,8 +634,7 @@ def check_solution_file(model, values, claimed_objective, ar, opt, rep):
     feas_ok = rel_v <= opt.primal_tol
     rep.say("feasibility: max violation %s absolute, %s relative%s" % (fmt(abs_v), fmt(rel_v), (" at " + where) if where else ""))
     rep.check("primal_feasibility", feas_ok, max_abs=abs_v, max_rel=rel_v, tolerance=opt.primal_tol)
-    c, offset = internal_costs(model, ar)
-    obj = _sense_sign(model) * (offset + ar.total([c[j] * x[j] for j in range(model.n_cols) if x[j] != 0]))
+    obj = _sense_sign(model) * primal_objective(model, ar, x)
     rep.say("exact objective (model sense): %s" % fmt(obj))
     ok = feas_ok
     if claimed_objective is not None:
