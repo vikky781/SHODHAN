@@ -181,6 +181,16 @@ of absolute value at most that to zero). It is a claim, reported by the verifier
 (the verifier answers INCONCLUSIVE). Multipliers from the interior-point method carry floating-point noise, so many
 QP certificates pass only at tolerance level; the corpus counts are in the step report.
 
+### Pooling certificates
+
+`shodhan pool spec.pool --write-cert cert.json` ([POOLING.md](POOLING.md)) writes a certificate for a LOCAL solution of a nonconvex
+problem. `problem` is `{name, file_sha256 (of the .pool file), kind: "pooling", sources, pools, terminals, qualities, synthetic}`. Status
+`feasible` has `flows` (arc `FROM>TO` to value), `q` (`POOL:QUALITY` to value), `claimed_objective`, `claimed_upper_bound` (the
+McCormick bound, when it was computed), `converged` (false when the point is feasible but the method cycled or hit its limit),
+`optimality_certified: false` and `nonconvex: true`; `tolerances.pool_tol` is the tolerance of the check. Status `other` has no body. KASAUTI
+checks the nonlinear constraints of the model in exact arithmetic within the stated tolerance, recomputes the objective, and reports
+the McCormick bound as **not verified** (it only checks that the claimed bound is not below the objective of the feasible point).
+
 ## 3. What is and is not certified
 
 Certified (for the model file as read): that the stated `x` is feasible within the reported violation; that the

@@ -149,6 +149,25 @@ run (cap, float mode) the verdict is `PASS_OPTIMAL_TOL` with the note "convexity
 certificates are INCONCLUSIVE. Tests: `verify/tests/test_qp_checks.py`, `verify/tests/test_qp_mutations.py` (every
 harmful corruption of a QP certificate must be rejected) and the QP part of the corpus.
 
+## Pooling certificates
+
+`python -m kasauti spec.pool cert.json` verifies a pooling certificate ([POOLING.md](POOLING.md), [CERTIFICATES.md](CERTIFICATES.md)).
+The `.pool` file is read by `verify/kasauti/pool.py`, which has its own parser written from POOLING.md section 2 (a differential test compares
+it with the C++ parser on 720 generated and damaged texts), and the relative residuals of the ORIGINAL nonlinear model (POOLING.md section 3)
+are evaluated in exact rational arithmetic (`--mode float` for floats). `--pool-tol` (default 1e-6) is the largest accepted residual.
+
+| Verdict | Meaning |
+|---------|---------|
+| `PASS_FEASIBLE` | every residual of the nonlinear model is exactly zero (exact mode) |
+| `PASS_FEASIBLE_TOL` | every residual is within `--pool-tol`: the nonlinear constraints hold within the stated tolerance |
+| `FAIL` | a residual above the tolerance, a wrong objective claim, a claimed bound below the objective, a claim of optimality, or a hash mismatch |
+| `INCONCLUSIVE` | status `other`, an unparsable `.pool` file, or an unsupported status |
+
+Neither verdict certifies optimality, and the McCormick bound claimed in the certificate is **not verified**: the output says so explicitly.
+Tests: `verify/tests/test_pool.py` (hand-made certificates, a corpus of at least 100 certificates written by `shodhan pool` on seeded
+SYNTHETIC instances verified in exact and float mode, mutation tests judged by an oracle written independently from the definitions,
+and the parser differential test).
+
 ## Limits
 
 - Float mode cannot prove that Q is positive semidefinite.
