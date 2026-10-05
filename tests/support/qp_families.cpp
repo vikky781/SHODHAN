@@ -59,10 +59,13 @@ PlantedQp make_planted_qp(std::uint64_t seed, QpVariant variant) {
     if (variant == QpVariant::Singular) rank = rng.range(1, std::max(1, n - 1));
     std::vector<std::vector<double>> l(to_size(n), std::vector<double>(to_size(rank), 0.0));
     for (int i = 0; i < n; ++i) {
+      // Entries are multiples of 1/16, so that every product and sum in Q = L L^T is exact in double precision: the Q written
+      // to a file is then exactly positive semidefinite (an exact PSD test of a rounded rank-deficient Gram matrix would
+      // find tiny negative pivots).
       for (int k = 0; k < rank; ++k) {
-        if (rng.chance(0.5)) l[to_size(i)][to_size(k)] = rng.uniform(-1.5, 1.5);
+        if (rng.chance(0.5)) l[to_size(i)][to_size(k)] = std::round(rng.uniform(-1.5, 1.5) * 16.0) / 16.0;
       }
-      if (variant != QpVariant::Singular && i < rank) l[to_size(i)][to_size(i)] += rng.uniform(0.3, 1.0);
+      if (variant != QpVariant::Singular && i < rank) l[to_size(i)][to_size(i)] += std::round(rng.uniform(0.3, 1.0) * 16.0) / 16.0;
     }
     for (int i = 0; i < n; ++i) {
       for (int j = 0; j <= i; ++j) {

@@ -28,6 +28,7 @@ def main():
         manifest = list(csv.DictReader(f))
     per_family = collections.defaultdict(lambda: collections.Counter())
     attempts = collections.Counter()
+    convexity = collections.Counter()
     problems = []
     for row in manifest:
         name, family = row["name"], row["family"]
@@ -44,6 +45,8 @@ def main():
         for mode in ("exact", "float"):
             code, rep = cli.verify(mps, cert_path, make_args(mode=mode))
             results[mode] = (code, rep.detail, rep.rigorous)
+            if cert["status"] == "optimal" and "convexity" in rep.data:
+                convexity["%s mode: Q %s" % (mode, rep.data["convexity"])] += 1
         ce, cf = results["exact"], results["float"]
         c = per_family[family]
         c["total"] += 1
@@ -79,6 +82,8 @@ def main():
         tot, mips, sum(c["exact PASS"] for c in per_family.values()), sum(c["float PASS"] for c in per_family.values()),
         sum(c["inconclusive (expected)"] for c in per_family.values()), sum(c["agree"] for c in per_family.values()),
         sum(c["rigorous"] for c in per_family.values()), sum(c["tolerance-level"] for c in per_family.values())))
+    if convexity:
+        print("  convexity of Q (optimal QP certificates): " + ", ".join("%s: %d" % (k, v) for k, v in sorted(convexity.items())))
     print("  attempts (configuration / count):")
     for k, v in sorted(attempts.items(), key=lambda kv: -kv[1]):
         print("    %4d  %s" % (v, k))

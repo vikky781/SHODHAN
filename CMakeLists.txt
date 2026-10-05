@@ -81,7 +81,7 @@ if(SHODHAN_BUILD_TESTS)
 
   # Corpus generator for the KASAUTI integration test (writes models and certificates into a directory).
   add_executable(shodhan_cert_corpus tests/corpus/cert_corpus.cpp tests/support/lp_families.cpp tests/support/random_lp.cpp
-                 tests/support/simplex_lps.cpp tests/support/mip_families.cpp)
+                 tests/support/simplex_lps.cpp tests/support/mip_families.cpp tests/support/qp_families.cpp)
   target_link_libraries(shodhan_cert_corpus PRIVATE shodhan_core)
   target_include_directories(shodhan_cert_corpus PRIVATE tests src)
   shodhan_configure_target(shodhan_cert_corpus)
@@ -115,7 +115,7 @@ if(SHODHAN_BUILD_TESTS)
         COMMAND ${Python3_EXECUTABLE} ${KASAUTI_DIR}/tests/corpus_check.py ${KASAUTI_CORPUS_DIR})
       set_tests_properties(kasauti_corpus_check PROPERTIES FIXTURES_REQUIRED kasauti_corpus)
       add_test(NAME kasauti_mutations
-        COMMAND ${Python3_EXECUTABLE} -m unittest tests.test_mutations
+        COMMAND ${Python3_EXECUTABLE} -m unittest tests.test_mutations tests.test_qp_mutations
         WORKING_DIRECTORY ${KASAUTI_DIR})
       set_tests_properties(kasauti_mutations PROPERTIES FIXTURES_REQUIRED kasauti_corpus
                            ENVIRONMENT "KASAUTI_CORPUS=${KASAUTI_CORPUS_DIR}")

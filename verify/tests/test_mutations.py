@@ -143,8 +143,11 @@ class Oracle:
                 worst = max(worst, -r[j] / rmax)
         for i, row in enumerate(self.rows):
             ar = sum((a * r[j] for j, a in row), F(0))
-            mag = sum((abs(a * r[j]) for j, a in row), F(0))
-            norm = mag if mag > 0 else rmax
+            # Normwise, like the columns (docs/CERTIFICATES.md, fixed in step 7): relative to ||a_i||_1 * ||r||_inf. The magnitude
+            # of the nonzero terms alone is exactly the activity for a row with a single nonzero term.
+            norm = sum((abs(a) for j, a in row), F(0)) * rmax
+            if norm == 0:
+                continue
             if m.row_lo[i] is not None and ar < 0:
                 worst = max(worst, -ar / norm)
             if m.row_hi[i] is not None and ar > 0:
@@ -176,6 +179,8 @@ class MutationTests(unittest.TestCase):
         for p in sorted(glob.glob(os.path.join(CORPUS, "*.cert.json"))):
             with open(p) as f:
                 cert = json.load(f)
+            if cert.get("problem", {}).get("quadratic") and cert["status"] == "optimal":
+                continue  # QP certificates have their own mutation test (test_qp_mutations.py): this oracle has no Q
             if cert["status"] in ("optimal", "infeasible", "unbounded", "feasible"):
                 cls.items.append((p.replace(".cert.json", ".mps"), cert))
 

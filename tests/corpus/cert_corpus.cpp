@@ -4,7 +4,8 @@
 // plus <dir>/corpus.csv (name,family,status,attempts,configuration,expect). The Python side (KASAUTI) then
 // verifies every certificate; `expect` is "pass" or "inconclusive" (a certificate that certifies nothing, such
 // as an infeasibility proved by branching). Usage: shodhan_cert_corpus <dir> [lps_per_family] [mips_per_family]
-// (defaults 60 and 15: 420 LPs, 6 special models and 150 MILPs).
+// (defaults 60 and 15: 420 LPs, 6 special models and 150 MILPs) [qps_per_variant] (default 28: 224 planted convex QPs of
+// eight variants plus infeasible, unbounded and non-convex ones).
 //
 // The model that is solved is the one READ BACK from the MPS file, so the certificate is about exactly the
 // file whose SHA-256 it carries.
@@ -23,6 +24,7 @@
 #include "shodhan/version.hpp"
 #include "support/lp_families.hpp"
 #include "support/mip_families.hpp"
+#include "support/qp_families.hpp"
 
 using namespace shodhan;
 using namespace shodhan::testing;
@@ -66,6 +68,7 @@ int main(int argc, char** argv) {
   const std::string dir = argv[1];
   const int per_family = argc > 2 ? std::atoi(argv[2]) : 60;
   const int mips_per_family = argc > 3 ? std::atoi(argv[3]) : 15;
+  const int qps_per_variant = argc > 4 ? std::atoi(argv[4]) : 28;
   std::vector<Entry> entries;
   static const char* const keys[kNumFamilies] = {"degenerate", "free", "ranged", "boxed", "wide", "infeasible", "unbounded"};
   for (int f = 0; f < kNumFamilies; ++f) {
@@ -82,6 +85,21 @@ int main(int argc, char** argv) {
       if (k % 5 == 0) e.node_limit = 2;  // some runs stop early: a feasible certificate with a bound that is not tight
       entries.push_back(std::move(e));
     }
+  }
+  // Convex QPs with a planted optimum (all variants, including singular Q), then QPs that certify nothing or little.
+  for (int v = 0; v < static_cast<int>(QpVariant::kCount); ++v) {
+    for (int k = 1; k <= qps_per_variant; ++k) {
+      const std::uint64_t seed = 700000ULL + static_cast<std::uint64_t>(v) * 1000ULL + static_cast<std::uint64_t>(k);
+      entries.push_back({"qp_" + std::to_string(v) + "_" + std::to_string(k), std::string("qp ") + qp_variant_name(static_cast<QpVariant>(v)),
+                         make_planted_qp(seed, static_cast<QpVariant>(v)).model});
+    }
+  }
+  for (int k = 1; k <= qps_per_variant / 3 + 1; ++k) {
+    entries.push_back({"qp_infeasible_" + std::to_string(k), "qp infeasible", make_infeasible_qp(800000ULL + static_cast<std::uint64_t>(k))});
+    entries.push_back({"qp_unbounded_" + std::to_string(k), "qp unbounded", make_unbounded_qp(810000ULL + static_cast<std::uint64_t>(k))});
+    LpModel nc = make_planted_qp(820000ULL + static_cast<std::uint64_t>(k), QpVariant::PositiveDefinite).model;
+    nc.quadratic.value[0] = nc.sense == Sense::Maximize ? 50.0 : -50.0;  // the diagonal of column 0 with the wrong sign: indefinite
+    entries.push_back({"qp_nonconvex_" + std::to_string(k), "qp non-convex", nc});
   }
 
   std::ofstream csv(dir + "/corpus.csv");
@@ -138,8 +156,10 @@ int main(int argc, char** argv) {
       std::cerr << error << "\n";
       return 2;
     }
-    csv << e.name << "," << e.family << "," << certificate_status(result) << "," << result.attempts << "," << result.configuration << ",pass\n";
-    if (certificate_status(result) == "other") {
+    const bool qp_without_proof = e.family == "qp unbounded" || e.family == "qp non-convex";
+    csv << e.name << "," << e.family << "," << certificate_status(result) << "," << result.attempts << "," << result.configuration << ","
+        << (qp_without_proof ? "inconclusive" : "pass") << "\n";
+    if (certificate_status(result) == "other" && !qp_without_proof) {
       ++failures;
       std::cerr << "no certificate for " << e.name << ": " << to_string(result.status) << " " << result.message << "\n";
     }
