@@ -47,7 +47,7 @@ set(SHODHAN_CORE_SOURCES
   src/util/status.cpp
 )
 file(GLOB SHODHAN_OPTIONAL_CORE_SOURCES CONFIGURE_DEPENDS
-  src/util/*.cpp src/model/*.cpp src/io/*.cpp src/scaling/*.cpp src/presolve/*.cpp src/linalg/*.cpp src/lp/*.cpp src/cert/*.cpp src/mip/*.cpp src/ipm/*.cpp src/structure/*.cpp)
+  src/util/*.cpp src/model/*.cpp src/io/*.cpp src/scaling/*.cpp src/presolve/*.cpp src/linalg/*.cpp src/lp/*.cpp src/cert/*.cpp src/mip/*.cpp src/ipm/*.cpp src/structure/*.cpp src/pooling/*.cpp)
 list(APPEND SHODHAN_CORE_SOURCES ${SHODHAN_OPTIONAL_CORE_SOURCES})
 list(REMOVE_DUPLICATES SHODHAN_CORE_SOURCES)
 
@@ -119,6 +119,17 @@ if(SHODHAN_BUILD_TESTS)
         WORKING_DIRECTORY ${KASAUTI_DIR})
       set_tests_properties(kasauti_mutations PROPERTIES FIXTURES_REQUIRED kasauti_corpus
                            ENVIRONMENT "KASAUTI_CORPUS=${KASAUTI_CORPUS_DIR}")
+      # Synthetic refinery / process case-study models (bench/refinery, standard-library Python): the generators and their
+      # tests, then the C++ reader, round trip and brute-force agreement on the tiny models.
+      set(REFINERY_DIR ${CMAKE_CURRENT_BINARY_DIR}/refinery_models)
+      add_test(NAME refinery_generate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/refinery/generate.py --suite ${REFINERY_DIR} --sizes tiny,small)
+      set_tests_properties(refinery_generate PROPERTIES FIXTURES_SETUP refinery_models)
+      add_test(NAME refinery_unittests
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -t .
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bench/refinery)
+      add_test(NAME refinery_cpp COMMAND shodhan_tests refinery)
+      set_tests_properties(refinery_cpp PROPERTIES FIXTURES_REQUIRED refinery_models ENVIRONMENT "SHODHAN_REFINERY_DIR=${REFINERY_DIR}")
     else()
       # A visible skip, not a silent pass.
       add_test(NAME kasauti_skipped COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: Python 3 not found, KASAUTI tests not run")
