@@ -163,6 +163,10 @@ certificate passes in exact and in float mode, 120 of them rigorously and 306 to
 | MILP certificates (feasible point, exact integrality; the bound is claimed, not verified) | implemented |
 | MIP presolve: bound propagation, coefficient tightening, probing, parallel rows, duplicate and dominated columns, clique table | implemented; tested on generated instances only |
 | Root cut loop: Gomory mixed-integer, MIR with aggregation, lifted covers, clique, implied-bound cuts; `add_rows`/`remove_rows` on the engine | implemented; tested on generated instances only |
+| Structure analysis (variable upper bounds, flow balances, set rows) and big-M tightening with implied bounds ([docs/STRUCTURE.md](docs/STRUCTURE.md)) | implemented; tested on generated instances (exact detection counts, optimum unchanged against brute force); effect on the cuts not measurable on the small tests |
+| Synthetic refinery and process case studies, `bench/refinery/` ([docs/REFINERY.md](docs/REFINERY.md)): crude blending LP, multi-period planning LP, crude scheduling MILP, blend/changeover MILP, facility location MILP | implemented; **all models are SYNTHETIC** (textbook structure, invented numbers; not plant or MRPL data); unit commitment (R6) not implemented |
+| Pooling driver `shodhan pool`: distributive recursion, sequential LP with a trust region, multi-start, McCormick upper bound ([docs/POOLING.md](docs/POOLING.md)) | implemented; **local solutions only**, no global guarantee; the recursion is weak (see the docs); synthetic instances only |
+| Pooling certificates and the KASAUTI pooling verifier (exact residuals of the nonlinear model; the McCormick bound is reported as not verified) | implemented; feasibility within a stated tolerance only, optimality is never certified |
 | Restarts, cuts at tree nodes, zero-half cuts, RENS/RINS, multithreading, MIQP, IPM crossover | not yet implemented |
 | GPU acceleration                                     | not yet implemented |
 
