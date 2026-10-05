@@ -44,7 +44,7 @@ struct ConvexityReport {
   /// Largest absolute entry of Q and the absolute tolerance used for the pivots.
   double scale = 0.0;
   double tolerance = 0.0;
-  /// Rank found (number of positive pivots).
+  /// Rank found (number of positive pivots); -1 when not determined (the sparse test).
   Index rank = 0;
   std::string note;
 };

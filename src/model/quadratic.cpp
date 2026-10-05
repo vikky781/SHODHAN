@@ -79,10 +79,11 @@ double model_objective(const LpModel& m, std::span<const double> x) {
 
 namespace {
 
-// Sparse test for large Q: LDL^T of Q (minimization form) with an AMD ordering and no static regularization. Every
-// symmetric permutation of a positive semidefinite matrix has pivots >= 0 in exact arithmetic, and a zero pivot forces
-// its remaining column to zero; if it did not (indefinite Q), the replacement of the tiny pivot makes a later pivot hugely
-// negative, so the smallest pivot is what decides.
+// Sparse test for large Q: LDL^T of Q + s I (minimization form) with an AMD ordering, s = rel_tol * max|q|. A positive
+// semidefinite Q gives a positive definite Q + s I, whose pivots are at least s up to rounding, so a negative pivot proves
+// that Q has an eigenvalue below -s. Without the shift a singular positive semidefinite Q (CVXQP1_L of Maros-Meszaros is
+// one) has pivots that are zero up to rounding, and the unpivoted elimination then produces large spurious negative pivots.
+// The answer "convex" means: no eigenvalue below -s was found, which is the tolerance of the dense test as well.
 ConvexityReport sparse_convexity(const LpModel& m, double sgn, double rel_tol) {
   ConvexityReport rep;
   const Index n = m.n_cols;
@@ -95,13 +96,17 @@ ConvexityReport sparse_convexity(const LpModel& m, double sgn, double rel_tol) {
       scale = std::max(scale, std::fabs(v));
     }
   }
+  const double shift = rel_tol * std::max(scale, 1e-300);
   // Every diagonal entry must exist for the pivot bookkeeping; absent ones are zero.
   std::vector<char> has_diag(to_size(n), 0);
-  for (const Triplet& tr : t) {
-    if (tr.row == tr.col) has_diag[to_size(tr.row)] = 1;
+  for (Triplet& tr : t) {
+    if (tr.row == tr.col) {
+      has_diag[to_size(tr.row)] = 1;
+      tr.value += shift;
+    }
   }
   for (Index j = 0; j < n; ++j) {
-    if (!has_diag[to_size(j)]) t.push_back({j, j, 0.0});
+    if (!has_diag[to_size(j)]) t.push_back({j, j, shift});
   }
   SparseMatrix q;
   std::string err;
@@ -123,15 +128,15 @@ ConvexityReport sparse_convexity(const LpModel& m, double sgn, double rel_tol) {
     return rep;
   }
   const double minp = ldl.stats().min_pivot;
-  if (minp < -rep.tolerance) {
+  if (minp < 0.0) {
     rep.pivot = minp;
     rep.column = ldl.stats().min_pivot_column;
     rep.note = "negative pivot " + sci(minp) + " at column " + std::to_string(rep.column) + " (sparse LDL^T)";
     return rep;
   }
   rep.convex = true;
-  rep.rank = n - static_cast<Index>(ldl.stats().dynamic_regularizations);
-  rep.note = "sparse LDL^T";
+  rep.rank = -1;  // not determined by the shifted factorization
+  rep.note = "sparse LDL^T of Q + s I";
   return rep;
 }
 

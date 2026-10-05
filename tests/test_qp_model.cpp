@@ -378,7 +378,6 @@ TEST_CASE(convexity_of_a_large_q_uses_the_sparse_factorization) {
   }
   r = check_convexity(model_with_q(n, pd));
   CHECK(r.convex);
-  CHECK_EQ(r.rank, n);
   // One negative diagonal entry makes it indefinite; the column is reported.
   std::vector<Triplet> bad = lap;
   bad[to_size(2 * 700)].value = -0.5;  // the diagonal entry of column 700
@@ -388,4 +387,29 @@ TEST_CASE(convexity_of_a_large_q_uses_the_sparse_factorization) {
   CHECK(r.pivot < 0.0);
   // The same matrix as a maximization problem: -Q is then what must be PSD, and the negated Laplacian is not.
   CHECK(!check_convexity(model_with_q(n, lap, Sense::Maximize)).convex);
+}
+
+TEST_CASE(convexity_of_a_large_singular_gram_matrix_with_a_wide_weight_range) {
+  // Sum of w_i (x_a + x_b + x_c)^2 with weights from 1 to 1500 and repeated index triples: positive semidefinite and
+  // singular. Without a shift, the unpivoted elimination of such a matrix produced large spurious negative pivots (the
+  // CVXQP*_L models of Maros-Meszaros have this structure).
+  const Index n = 1500;
+  std::vector<double> dense(to_size(n) * to_size(n), 0.0);
+  for (Index i = 0; i < n; ++i) {
+    const Index idx[3] = {i, (2 * i + 1) % n, (3 * i + 2) % n};
+    const double w = static_cast<double>(i + 1);
+    for (Index a : idx) {
+      for (Index b : idx) dense[to_size(a) * to_size(n) + to_size(b)] += w;
+    }
+  }
+  std::vector<Triplet> low;
+  for (Index j = 0; j < n; ++j) {
+    for (Index i = j; i < n; ++i) {
+      const double v = dense[to_size(i) * to_size(n) + to_size(j)];
+      if (v != 0.0) low.push_back({i, j, v});
+    }
+  }
+  const ConvexityReport r = check_convexity(model_with_q(n, low));
+  CHECK(r.decided);
+  CHECK(r.convex);
 }
