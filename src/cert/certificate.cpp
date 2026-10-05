@@ -72,6 +72,10 @@ static void write_head(JsonWriter& w, const LpModel& model, const CertificateCon
   w.value(model.sense == Sense::Maximize ? "max" : "min");
   w.key("n_integer");
   w.value(static_cast<unsigned long long>(n_integer));
+  w.key("quadratic");
+  w.value(model.quadratic.nnz() > 0);
+  w.key("q_nnz");
+  w.value(static_cast<unsigned long long>(model.quadratic.nnz()));
   w.end_object();
   w.key("status");
   w.value(status);
