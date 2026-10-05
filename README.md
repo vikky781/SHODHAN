@@ -152,7 +152,7 @@ certificate passes in exact and in float mode, 120 of them rigorously and 306 to
 | KASAUTI verifier (`verify/`, standard-library Python, exact `Fraction` and float modes) | implemented; tested on generated models only |
 | `shodhan dump-model` (differential test of the MPS readers) | implemented |
 | Opt-in stress harness (`SHODHAN_BUILD_STRESS`, not part of ctest) | implemented |
-| `bench/run_set.py` (LPs and MILPs; `run_lp_set.py` is a wrapper), `bench/gen_mip.py` | implemented; no Netlib or MIPLIB files were available, so nothing real was run |
+| `bench/run_set.py` (LPs, MILPs and QPS files; `run_lp_set.py` is a wrapper), `bench/gen_mip.py`, `scripts/fetch_data.py` | implemented; real-data results below |
 | QPS files (QUADOBJ / QMATRIX), exact and sparse convexity test | implemented; quadratic constraints are rejected |
 | Sparse LDL^T with approximate minimum degree ([docs/LDL.md](docs/LDL.md)) | implemented; scalar code, no dense-row handling |
 | Interior-point method for LPs and convex QPs, Mehrotra with Gondzio correctors ([docs/IPM.md](docs/IPM.md)) | implemented; weaker than the simplex on ill-conditioned LPs; no crossover |
@@ -165,6 +165,23 @@ certificate passes in exact and in float mode, 120 of them rigorously and 306 to
 | Root cut loop: Gomory mixed-integer, MIR with aggregation, lifted covers, clique, implied-bound cuts; `add_rows`/`remove_rows` on the engine | implemented; tested on generated instances only |
 | Restarts, cuts at tree nodes, zero-half cuts, RENS/RINS, multithreading, MIQP, IPM crossover | not yet implemented |
 | GPU acceleration                                     | not yet implemented |
+
+## Results on real data (step 8)
+
+Files fetched by `scripts/fetch_data.py` into `data/raw/` (git-ignored). No reference objective values are built in and no
+comparison with any other solver was made; "solved" means the solver's own status `Optimal` after its KKT and dual-bound
+acceptance checks, and the KASAUTI columns say what an independent exact check could prove. Windows, Release build, one process
+at a time except where the machine was shared (so time limits can be missed more often than on a quiet machine).
+
+| Set | Instances | Optimal | Limit (time/iteration) | NumericalError | Other | KASAUTI on the certificates |
+|-----|-----------|---------|------------------------|----------------|-------|-----------------------------|
+| Netlib LPs (120 s limit) | 85 | 84 | 1 (GREENBEA, no certificate) | 0 | 0 | 5 PASS_OPTIMAL, 79 PASS_OPTIMAL_TOL, 1 INCONCLUSIVE, 0 FAIL |
+| Maros-Meszaros QPs (60 s limit) | 138 | 118 | 12 (BOYD1, BOYD2, CONT-300, CVXQP1_L, CVXQP3_L at the time limit; LISWET1/7/9/10/11/12 at the iteration limit; CVXQP2_L solved in an earlier run, at the limit in this one) | 4 (LISWET8, QGFRDXPN, QPILOTNO, QSEBA) | 3 InfeasibleOrUnbounded without certificate (HUESTIS, HUES-MOD, KSIP), 1 NonConvex (VALUES) | 22 PASS_OPTIMAL, 96 PASS_OPTIMAL_TOL, 18 INCONCLUSIVE (no certificate body), 0 FAIL |
+| MIPLIB 2017 benchmark-style set (30 s limit, 240 files) | 240 | 3 (DECOMP2, NEOS-2987310-JOES, NEOS8) | 228 at the limit; 9 more killed by the harness after 90 s | 0 | | 90 PASS_FEASIBLE (feasibility and integrality only, optimality never certified), 124 INCONCLUSIVE (no incumbent), 17 KASAUTI time-outs at 120 s, 0 FAIL |
+
+VALUES is confirmed not positive semidefinite by KASAUTI's exact test (negative pivot at column `as6`). 68 of the 138 QPS models were accepted
+as convex only within the tolerance of the floating-point test (`convexity: tolerance`); the exact test confirmed 55 of them
+and timed out (300 s) on 13, none was refuted.
 
 Hypersensitive LPs: wide seed 450741 may end in an honest `NumericalError` on some platforms. The two earlier open findings
 (seeds 450165 and 433) are fixed; details and evidence in [docs/KASAUTI.md](docs/KASAUTI.md).
