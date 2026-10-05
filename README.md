@@ -146,23 +146,24 @@ certificate passes in exact and in float mode, 120 of them rigorously and 306 to
 | `shodhan info`, `shodhan presolve`                   | implemented         |
 | `shodhan factor-bench` (developer diagnostic for the LU) | implemented     |
 | LP dual simplex (bound flipping, Harris, steepest edge, perturbation, phase 1, primal cleanup), Farkas and ray certificates | implemented; tested on generated models only |
-| `shodhan solve`                                      | LPs: full pipeline; MILPs: branch and bound; quadratic objectives: `NotImplemented` |
+| `shodhan solve`                                      | LPs: full pipeline; MILPs: branch and bound; convex QPs: interior point (`--method auto\|simplex\|ipm`); MIQP: `NotImplemented` |
 | Certificates (`--write-cert`): own SHA-256, own JSON writer, optimal / infeasible / unbounded bodies | implemented |
 | Weak-duality bound of the multipliers in the LP acceptance check, with a `rigorous` flag | implemented |
 | KASAUTI verifier (`verify/`, standard-library Python, exact `Fraction` and float modes) | implemented; tested on generated models only |
 | `shodhan dump-model` (differential test of the MPS readers) | implemented |
 | Opt-in stress harness (`SHODHAN_BUILD_STRESS`, not part of ctest) | implemented |
 | `bench/run_set.py` (LPs and MILPs; `run_lp_set.py` is a wrapper), `bench/gen_mip.py` | implemented; no Netlib or MIPLIB files were available, so nothing real was run |
-| QPS files (QUADOBJ / QMATRIX)                        | not yet implemented |
-| LP solver (interior point)                           | not yet implemented |
+| QPS files (QUADOBJ / QMATRIX), exact and sparse convexity test | implemented; quadratic constraints are rejected |
+| Sparse LDL^T with approximate minimum degree ([docs/LDL.md](docs/LDL.md)) | implemented; scalar code, no dense-row handling |
+| Interior-point method for LPs and convex QPs, Mehrotra with Gondzio correctors ([docs/IPM.md](docs/IPM.md)) | implemented; weaker than the simplex on ill-conditioned LPs; no crossover |
+| QP certificates and exact QP checks in KASAUTI ([docs/QP.md](docs/QP.md)) | implemented; tolerance-level when convexity cannot be proved (above `--psd-cap`, float mode); no unbounded QP certificates |
 | MILP branch and bound: node tree, best-bound/depth/best-estimate selection with plunging, objective-integrality pruning | implemented; tested on small generated instances only |
 | Branching: most fractional, first index, pseudocost, reliability (strong branching on engine copies) | implemented |
 | Primal heuristics: trivial, simple rounding, fractional and coefficient diving, Feasibility Jump | implemented |
 | MILP certificates (feasible point, exact integrality; the bound is claimed, not verified) | implemented |
 | MIP presolve: bound propagation, coefficient tightening, probing, parallel rows, duplicate and dominated columns, clique table | implemented; tested on generated instances only |
 | Root cut loop: Gomory mixed-integer, MIR with aggregation, lifted covers, clique, implied-bound cuts; `add_rows`/`remove_rows` on the engine | implemented; tested on generated instances only |
-| Restarts, cuts at tree nodes, zero-half cuts, RENS/RINS, multithreading | not yet implemented |
-| Convex QP                                            | not yet implemented |
+| Restarts, cuts at tree nodes, zero-half cuts, RENS/RINS, multithreading, MIQP, IPM crossover | not yet implemented |
 | GPU acceleration                                     | not yet implemented |
 
 Hypersensitive LPs: wide seed 450741 may end in an honest `NumericalError` on some platforms. The two earlier open findings
