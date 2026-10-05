@@ -52,6 +52,7 @@ std::vector<std::pair<std::string, int>> PresolveStats::reduction_counts() const
       {"improving columns dropped", unbounded_columns},
       {"bounds propagated", propagated_bounds},
       {"coefficients tightened", coefficients_tightened},
+      {"implied-bound tightenings", implied_bound_tightenings},
       {"probing fixings", probing_fixings},
       {"probing bounds", probing_bounds},
       {"implications", implications},

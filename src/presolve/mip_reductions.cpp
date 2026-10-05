@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -235,8 +236,12 @@ bool is_binary(const WorkModel& w, int j) {
   return w.col_alive[u(j)] && w.is_int[u(j)] && w.cl[u(j)] == 0.0 && w.cu[u(j)] == 1.0;
 }
 
-// Coefficient tightening (Savelsbergh 1994) on rows with exactly one finite side.
-bool tighten_coefficients(Context& c) {
+// Coefficient tightening (Savelsbergh 1994) on rows with exactly one finite side. With `implied` (the propagator at its
+// fixpoint) the activity bounds use the implied column bounds, which hold for every feasible point and are never looser
+// than the model's own: a variable-upper-bound row  x - M y <= 0  then gets M := the implied upper bound of x, and an
+// indicator row  a^T x <= b + M (1 - y)  the implied activity (docs/STRUCTURE.md). Valid because every feasible point
+// satisfies the implied bounds, so replacing the coefficient only changes the LP relaxation, never an integer-feasible point.
+bool tighten_coefficients(Context& c, const Propagator* implied) {
   WorkModel& w = c.w;
   bool changed = false;
   for (int i = 0; i < w.m; ++i) {
@@ -246,11 +251,19 @@ bool tighten_coefficients(Context& c) {
     const double s = has_u ? 1.0 : -1.0;
     double b = has_u ? w.ru[u(i)] : -w.rl[u(i)];
     double maxact = 0.0;
-    bool finite = true, any_bin = false;
+    bool finite = true, any_bin = false, used_implied = false;
     for (const Entry& e : w.rows[u(i)]) {
       if (!w.col_alive[u(e.idx)]) continue;
       const double a = s * e.val;
-      const double ext = a > 0.0 ? w.cu[u(e.idx)] : w.cl[u(e.idx)];
+      const double model_ext = a > 0.0 ? w.cu[u(e.idx)] : w.cl[u(e.idx)];
+      double ext = model_ext;
+      if (implied != nullptr) {
+        const double ie = a > 0.0 ? implied->up[u(e.idx)] : implied->lo[u(e.idx)];
+        if (a > 0.0 ? ie < ext : ie > ext) {
+          ext = ie;
+          used_implied = true;
+        }
+      }
       if (is_inf(ext)) {
         finite = false;
         break;
@@ -289,6 +302,7 @@ bool tighten_coefficients(Context& c) {
       ++c.stats.coefficients_tightened;
       row_changed = true;
     }
+    if (row_changed && used_implied) ++c.stats.implied_bound_tightenings;
     if (row_changed) {
       if (has_u) w.ru[u(i)] = b; else w.rl[u(i)] = -b;
       w.row_mag[u(i)] = std::max(w.row_mag[u(i)], std::fabs(b));
@@ -554,16 +568,19 @@ bool run_mip_round(Context& c, MipWork& mw) {
   bool changed = false;
   const long long work_before = mw.prop_work + mw.probe_work;
   w.compact();
+  std::unique_ptr<Propagator> fix;
   if (o.mip_propagation) {
-    Propagator p(c, &mw.prop_work, o.propagation_work_limit);
-    p.queue_all();
-    if (!p.propagate()) {
+    fix = std::make_unique<Propagator>(c, &mw.prop_work, o.propagation_work_limit);
+    fix->queue_all();
+    if (!fix->propagate()) {
       c.mark_infeasible("bound propagation found a conflict");
       return true;
     }
-    changed = sync_bounds(c, p) || changed;
+    changed = sync_bounds(c, *fix) || changed;
   }
-  if (o.coefficient_tightening) changed = tighten_coefficients(c) || changed;
+  if (o.coefficient_tightening) {
+    changed = tighten_coefficients(c, o.implied_bound_tightening ? fix.get() : nullptr) || changed;
+  }
   if (o.parallel_rows) changed = merge_parallel_rows(c) || changed;
   if (o.duplicate_columns) changed = merge_columns(c, mw) || changed;
   if (o.probing) {

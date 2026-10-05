@@ -55,6 +55,10 @@ struct PresolveOptions {
   bool mip_propagation = true;
   /// Coefficient tightening (big-M reduction) of one-sided rows for binary columns.
   bool coefficient_tightening = true;
+  /// Let coefficient tightening use the IMPLIED column bounds of the bound propagation (also those of continuous columns
+  /// that the model leaves unbounded), which tightens big-M coefficients of variable-upper-bound and indicator rows
+  /// beyond what the column bounds alone allow (docs/STRUCTURE.md). Needs mip_propagation.
+  bool implied_bound_tightening = true;
   /// Probing on binary columns: fix to 0 and to 1, propagate, derive fixings, bounds and implications.
   bool probing = true;
   /// Duplicate and parallel rows (the tighter range is kept), duplicate and dominated columns.
@@ -100,6 +104,7 @@ struct PresolveStats {
   // MIP reductions
   int propagated_bounds = 0;      // bounds tightened by the propagation to a fixpoint (integer columns)
   int coefficients_tightened = 0; // coefficients changed by coefficient tightening
+  int implied_bound_tightenings = 0; // rows whose tightening needed an implied bound (not the model's own bound)
   int probing_fixings = 0;        // columns fixed by probing
   int probing_bounds = 0;         // bounds tightened by probing (both branches imply them)
   int implications = 0;           // implications stored

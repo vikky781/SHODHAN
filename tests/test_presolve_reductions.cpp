@@ -501,7 +501,7 @@ TEST_CASE(presolve_reports_a_counter_per_reduction_and_the_model_sizes) {
   CHECK_EQ(pr.stats.nnz_before, std::size_t{1});
   CHECK(pr.stats.passes >= 1);
   const auto counts = pr.stats.reduction_counts();
-  CHECK_EQ(counts.size(), std::size_t{22});
+  CHECK_EQ(counts.size(), std::size_t{23});
   CHECK_EQ(counts[0].first, std::string("empty rows"));
   CHECK(pr.stats.seconds >= 0.0);
 }
