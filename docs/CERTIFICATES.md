@@ -201,15 +201,18 @@ from the MPS conventions in this repository), (2) Python's `fractions.Fraction` 
 and (3) the input file itself. You do not have to trust the solver, its presolve, its scaling, its LU
 factorization, or the C++ certificate writer: a wrong certificate is simply rejected.
 
-### Resolution floor of the multipliers
+### Floor of the scale of a reduced cost
 
 When the strict bound is -infinity because a reduced cost `d_j` has the wrong sign on an infinite bound, the retry drops it if
-`|d_j| <= dual_zero_tol * scale_j`, with `scale_j = |c_j| + |(Qx)_j| + sum_i |a_ij y_i|`, **or** if `|d_j| <= 2^-52 * ||y||_inf *
-||a_j||_1`. The second rule exists because `scale_j` degenerates when every term of the column is dust (c_j = 0 and the only
-nonzero multiplier in the column is about 1e-17): `|d_j| / scale_j` is then 1 however small `d_j` is. A multiplier vector
-of doubles from a factorization is accurate normwise, about `2^-52 ||y||_inf` per component, so `d_j` cannot be resolved
-below `2^-52 ||y||_inf ||a_j||_1`. The constant is fixed in advance and was not tuned; the verdict stays tolerance-level.
-It was added after three Netlib certificates (BNL2, FINNIS, PEROLD) failed the retry in exactly this way.
+`|d_j| <= dual_zero_tol * scale_j`, with `scale_j = max(|c_j| + sum_k |q_jk x_k| + sum_i |a_ij y_i|, ||y||_inf * ||a_j||_1)`. The scale uses the absolute sum of the terms of `Qx`, not the net `|(Qx)_j|`, which can cancel to rounding dust. The floor
+exists because the first term degenerates when every term of the column is dust (c_j = 0 and the only nonzero multiplier in
+the column is about 1e-15): `|d_j| / scale_j` is then 1 however small `d_j` is. The multipliers are doubles from a factorization
+or an interior-point iteration, accurate normwise, so `d_j` is only known to the accuracy of `||y||_inf` times the size of its
+column. This is the column counterpart of the rule for rows, which are dropped normwise below `dual_zero_tol * ||y||_inf`, and
+it uses the same `dual_zero_tol`; no new constant. The verdict stays tolerance-level, the effect of the dropped entries on the
+primal point is reported, and the gap between primal objective and bound must still be within `--gap-tol`. It was introduced
+after three Netlib simplex certificates (BNL2, FINNIS, PEROLD) and six Maros-Meszaros interior-point certificates failed
+the retry in exactly this way (an `|d_j|` of 1e-17 to 1e-9 against a degenerate scale).
 
 ## 5. Tolerance conventions
 

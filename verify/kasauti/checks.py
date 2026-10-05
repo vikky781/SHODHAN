@@ -163,6 +163,18 @@ def quad_apply(model, ar, x):
     return out, half
 
 
+def quad_abs(model, ar, x):
+    """sum_k |q'_jk x_k| for every column j: the size of the terms that make up (Q' x)_j, which can cancel to dust."""
+    n = model.n_cols
+    acc = [[] for _ in range(n)]
+    for (i, j), v in model.quad.items():
+        q = ar.absval(ar.num(v))
+        acc[i].append(q * ar.absval(x[j]))
+        if i != j:
+            acc[j].append(q * ar.absval(x[i]))
+    return [ar.total(t) for t in acc]
+
+
 def primal_objective(model, ar, x):
     """Objective in the minimization form: offset + c^T x + (1/2) x^T Q x."""
     c, offset = internal_costs(model, ar)
@@ -235,6 +247,7 @@ def check_optimal(model, cert, ar, opt, rep):
 
     # d = c + Q x - A^T y, exactly (Q' of the minimization form; x~ = the certificate's x, see docs/CERTIFICATES.md).
     qx, quad_half = (quad_apply(model, ar, x) if model.quad else ([ar.zero] * model.n_cols, ar.zero))
+    qabs = quad_abs(model, ar, x) if model.quad else [ar.zero] * model.n_cols
     psd_status, psd_detail = check_psd(model, ar, opt)
     # Without a verified convex Q the weak-duality bound is not rigorous: the verdict is tolerance-level.
     convex_unproven = bool(model.quad) and psd_status == "not_verified"
@@ -284,14 +297,15 @@ def check_optimal(model, cert, ar, opt, rep):
             need_lo = d[j] > 0
             bound = model.col_lo[j] if need_lo else model.col_hi[j]
             if bound is None:
-                scale = ar.absval(c[j]) + ar.absval(qx[j]) + ar.total([ar.absval(ar.num(a) * y[i]) for i, a in model.col_entries[j] if y[i] != 0])
+                scale = ar.absval(c[j]) + qabs[j] + ar.total([ar.absval(ar.num(a) * y[i]) for i, a in model.col_entries[j] if y[i] != 0])
+                # Floor of the scale. The natural scale of d_j is the size of the terms it is made of, but when every term is dust
+                # (c_j = 0 and the only nonzero multipliers of the column are about 1e-15) the ratio |d_j| / scale is 1 however small
+                # d_j is. Multipliers are doubles accurate normwise, so d_j is only known to the accuracy of ||y||_inf times the size
+                # of its column: scale_j >= ||y||_inf * ||a_j||_1. This is the column counterpart of the rule for rows, which are
+                # dropped normwise below dual_zero_tol * ||y||_inf, and uses the same dual_zero_tol.
+                scale = max(scale, ymax * ar.total([ar.absval(ar.num(a)) for i, a in model.col_entries[j]]))
                 offenders.append(("column %s (d = %s)" % (model.col_names[j], fmt(d[j])), float(ar.absval(d[j])), float(ar.absval(d[j]) / scale)))
-                # Resolution floor of the multipliers: y is a vector of doubles accurate normwise, i.e. each y_i is only
-                # known to about eps * ||y||_inf, so d_j = c_j - a_j^T y cannot be resolved below eps * ||y||_inf * ||a_j||_1,
-                # whatever the size of the terms a_ij y_i themselves (they can all be dust, which makes `scale` degenerate and
-                # the ratio |d_j| / scale equal to 1). eps = 2^-52 is fixed in advance, not tuned.
-                noise = ar.num(2.0 ** -52) * ymax * ar.total([ar.absval(ar.num(a)) for i, a in model.col_entries[j]])
-                if drop > 0 and (ar.absval(d[j]) <= drop * scale or ar.absval(d[j]) <= noise):
+                if drop > 0 and ar.absval(d[j]) <= drop * scale:
                     dropped.append("column %s" % model.col_names[j])
                     effect.append(ar.absval(d[j]) * ar.absval(x[j]))
                 else:
