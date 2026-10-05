@@ -47,6 +47,14 @@ class QpCheckTests(unittest.TestCase):
         self.assertFalse(rep.rigorous)
         self.assertEqual(rep.data["convexity"], "not_verified")
 
+    def test_the_solvers_convexity_record_is_reported_but_the_exact_test_decides(self):
+        c = cert({"X2": 1}, {"R1": -1})
+        c["convexity"] = "tolerance"
+        code, rep = verify(QP, c)
+        self.assertEqual((code, rep.detail, rep.rigorous), (0, "PASS_OPTIMAL", True))
+        self.assertEqual(rep.data["solver_convexity"], "tolerance")
+        self.assertEqual(rep.data["convexity"], "psd")
+
     def test_the_exact_psd_test_is_capped_and_says_so(self):
         code, rep = verify(QP, cert({"X2": 1}, {"R1": -1}), psd_cap=1)
         self.assertEqual(code, 0)

@@ -242,6 +242,9 @@ def check_optimal(model, cert, ar, opt, rep):
         rep.say("convexity of Q: %s (%s)" % ({"psd": "positive semidefinite", "not_psd": "NOT positive semidefinite", "not_verified": "NOT verified"}[psd_status], psd_detail))
         rep.check("q_psd", psd_status != "not_psd", status=psd_status, detail=psd_detail)
         rep.data["convexity"] = psd_status
+        if cert.get("convexity") is not None:
+            rep.say("the solver recorded convexity of Q as: %s (a claim; the exact test above decides)" % cert["convexity"])
+            rep.data["solver_convexity"] = cert["convexity"]
     d = []
     for j, col in enumerate(model.col_entries):
         d.append(c[j] + qx[j] - ar.total([ar.num(a) * y[i] for i, a in col if y[i] != 0]))
@@ -283,7 +286,12 @@ def check_optimal(model, cert, ar, opt, rep):
             if bound is None:
                 scale = ar.absval(c[j]) + ar.absval(qx[j]) + ar.total([ar.absval(ar.num(a) * y[i]) for i, a in model.col_entries[j] if y[i] != 0])
                 offenders.append(("column %s (d = %s)" % (model.col_names[j], fmt(d[j])), float(ar.absval(d[j])), float(ar.absval(d[j]) / scale)))
-                if drop > 0 and ar.absval(d[j]) <= drop * scale:
+                # Resolution floor of the multipliers: y is a vector of doubles accurate normwise, i.e. each y_i is only
+                # known to about eps * ||y||_inf, so d_j = c_j - a_j^T y cannot be resolved below eps * ||y||_inf * ||a_j||_1,
+                # whatever the size of the terms a_ij y_i themselves (they can all be dust, which makes `scale` degenerate and
+                # the ratio |d_j| / scale equal to 1). eps = 2^-52 is fixed in advance, not tuned.
+                noise = ar.num(2.0 ** -52) * ymax * ar.total([ar.absval(ar.num(a)) for i, a in model.col_entries[j]])
+                if drop > 0 and (ar.absval(d[j]) <= drop * scale or ar.absval(d[j]) <= noise):
                     dropped.append("column %s" % model.col_names[j])
                     effect.append(ar.absval(d[j]) * ar.absval(x[j]))
                 else:

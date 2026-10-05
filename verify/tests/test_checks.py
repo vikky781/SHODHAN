@@ -285,3 +285,34 @@ class UncertifiedInfeasibilityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+NOISE = """NAME NOISE
+ROWS
+ N OBJ
+ G R1
+ G R2
+COLUMNS
+ X1 OBJ 1 R1 1
+ X2 R2 1
+RHS
+ RHS R1 1
+ENDATA
+"""
+
+
+class ResolutionFloorTests(unittest.TestCase):
+    """A reduced cost whose own terms are all dust: the ratio |d_j| / (|c_j| + sum |a_ij y_i|) is 1 whatever its size, so
+    the relative drop rule cannot decide; the resolution floor eps * ||y||_inf * ||a_j||_1 of the multipliers does."""
+
+    def cert(self, y2):
+        return make_cert(NOISE, "optimal", {"x": {"X1": 1}, "y": {"R1": 1, "R2": y2}, "claimed_objective": 1}, rows=2, cols=2, nnz=2)
+
+    def test_dust_below_the_resolution_of_y_is_dropped_at_tolerance_level(self):
+        code, rep = verify(NOISE, self.cert(1e-17))
+        self.assertEqual((code, rep.detail, rep.rigorous), (0, "PASS_OPTIMAL_TOL", False))
+
+    def test_a_wrong_signed_reduced_cost_above_the_floor_still_fails(self):
+        # d_2 = -1e-9 is 4.5e6 times the floor (2^-52 * 1 * 1) and its own scale is 1e-9: nothing allows dropping it.
+        code, rep = verify(NOISE, self.cert(1e-9))
+        self.assertEqual(code, 1)

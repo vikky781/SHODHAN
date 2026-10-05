@@ -166,6 +166,11 @@ first-order underestimate of the convex term at the certificate's own `x` (`Q'` 
 [QP.md](QP.md)). The bound is valid only if `Q'` is positive semidefinite, so the verifier tests that exactly
 (symmetric elimination, up to `--psd-cap` columns, *default* 120):
 
+`optimal` bodies of a QP also carry `convexity`, how the solver established convexity of Q: `float` (its floating-point
+test found Q positive semidefinite with no pivot treated as zero), `tolerance` (it did, but only within a tolerance: the
+sparse test factors Q + s I with s = 1e-9 max|q| and accepts an eigenvalue down to -s; the dense test sets a pivot
+of absolute value at most that to zero). It is a claim, reported by the verifier next to its own exact result.
+
 - not positive semidefinite: the certificate fails, whatever the solver claimed;
 - positive semidefinite proven: the verdict can be rigorous;
 - not verified (above the cap, or in float mode): the bound is reported as not rigorous and the verdict is
@@ -195,6 +200,16 @@ To trust a `PASS` you must trust (1) the verifier's MPS parser (written independ
 from the MPS conventions in this repository), (2) Python's `fractions.Fraction` arithmetic and standard library,
 and (3) the input file itself. You do not have to trust the solver, its presolve, its scaling, its LU
 factorization, or the C++ certificate writer: a wrong certificate is simply rejected.
+
+### Resolution floor of the multipliers
+
+When the strict bound is -infinity because a reduced cost `d_j` has the wrong sign on an infinite bound, the retry drops it if
+`|d_j| <= dual_zero_tol * scale_j`, with `scale_j = |c_j| + |(Qx)_j| + sum_i |a_ij y_i|`, **or** if `|d_j| <= 2^-52 * ||y||_inf *
+||a_j||_1`. The second rule exists because `scale_j` degenerates when every term of the column is dust (c_j = 0 and the only
+nonzero multiplier in the column is about 1e-17): `|d_j| / scale_j` is then 1 however small `d_j` is. A multiplier vector
+of doubles from a factorization is accurate normwise, about `2^-52 ||y||_inf` per component, so `d_j` cannot be resolved
+below `2^-52 ||y||_inf ||a_j||_1`. The constant is fixed in advance and was not tuned; the verdict stays tolerance-level.
+It was added after three Netlib certificates (BNL2, FINNIS, PEROLD) failed the retry in exactly this way.
 
 ## 5. Tolerance conventions
 
