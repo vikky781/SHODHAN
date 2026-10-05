@@ -35,7 +35,7 @@ double model_objective(const LpModel& m, std::span<const double> x);
 struct ConvexityReport {
   /// True when Q (in the minimization form of the model) was found positive semidefinite.
   bool convex = false;
-  /// True when the test could decide (false: the matrix is larger than the dense limit and no sparse test ran).
+  /// True when the test could decide (false only if the sparse factorization failed).
   bool decided = true;
   /// For a non-convex Q: the pivot (negative, or the offending zero pivot's row entry) and the column of the
   /// ORIGINAL model it belongs to.
@@ -49,7 +49,8 @@ struct ConvexityReport {
   std::string note;
 };
 
-/// Pivoted LDL^T (largest remaining diagonal first) of Q in minimization form. In exact arithmetic every pivot of a
+/// Pivoted LDL^T (largest remaining diagonal first) of Q in minimization form for up to 1200 columns; larger Q uses the
+/// sparse LDL^T with an AMD ordering (docs/QP.md). In exact arithmetic every pivot of a
 /// positive semidefinite matrix is >= 0 and a zero pivot forces its whole remaining row to be zero. Here a pivot below
 /// -tolerance, or a zero pivot (|pivot| <= tolerance) with a remaining entry above tolerance, proves that Q is not
 /// positive semidefinite; tolerance = relative_tolerance * max|q_ij|. Models without a quadratic term are convex.

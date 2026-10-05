@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "shodhan/basis_factor.hpp"
+#include "shodhan/sparse_ldl.hpp"
 #include "support/lu_testing.hpp"
 #include "test_harness.hpp"
 
@@ -160,4 +161,49 @@ TEST_CASE(lu_no_allocation_in_solves_and_updates_after_warm_up) {
     }
   }
   CHECK_EQ(g_allocations - before, 0L);
+}
+
+TEST_CASE(ldl_no_allocation_in_factorize_and_solve_after_warm_up) {
+#ifdef SHODHAN_ASAN
+  std::cout << "    SKIPPED under AddressSanitizer: allocations cannot be counted with the sanitizer allocator\n";
+  return;
+#endif
+  // A grid-like quasi-definite matrix: laplacian-type block over a negative diagonal block coupled by a sparse A.
+  const Index n1 = 120, n2 = 60, n = n1 + n2;
+  std::vector<Triplet> t;
+  Rng rng(5);
+  for (Index i = 0; i < n1; ++i) {
+    t.push_back({i, i, 4.0});
+    if (i + 1 < n1) t.push_back({i + 1, i, -1.0});
+  }
+  for (Index i = 0; i < n2; ++i) {
+    t.push_back({n1 + i, n1 + i, -2.0});
+    t.push_back({n1 + i, rng.range(0, n1 - 1), 1.0});
+    t.push_back({n1 + i, n1 - 1 - i, 0.5});
+  }
+  SparseMatrix k;
+  std::string err;
+  if (!SparseMatrix::from_triplets(n, n, t, &k, &err)) {
+    // duplicate (row, col) from the random column: drop the second entry and retry
+    t.pop_back();
+    REQUIRE(SparseMatrix::from_triplets(n, n, t, &k, &err));
+  }
+  std::vector<signed char> sign(to_size(n), 1);
+  for (Index i = n1; i < n; ++i) sign[to_size(i)] = -1;
+  SparseLdl ldl;
+  REQUIRE(ldl.analyze(k, sign));
+  std::vector<double> b(to_size(n), 1.0), x(to_size(n));
+  REQUIRE(ldl.factorize(k));  // warm-up
+  ldl.solve(b, x);
+  const long before = g_allocations;
+  {
+    CountGuard guard;
+    for (int r = 0; r < 5; ++r) {
+      ldl.factorize(k);
+      ldl.solve(b, x);
+    }
+  }
+  const long allocations = g_allocations - before;
+  std::cout << "    allocations inside SparseLdl::factorize and solve over 5 rounds after warm-up: " << allocations << "\n";
+  CHECK_EQ(allocations, 0L);
 }

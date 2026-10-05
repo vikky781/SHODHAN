@@ -1,10 +1,23 @@
 #include "shodhan/quadratic.hpp"
+#include "shodhan/sparse_ldl.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
+#include <string>
 
 namespace shodhan {
+
+namespace {
+
+std::string sci(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.4g", v);
+  return buf;
+}
+
+}  // namespace
 
 void quad_multiply(const SparseMatrix& q, std::span<const double> x, std::span<double> y) {
   const std::size_t n = to_size(q.n_cols);
@@ -64,6 +77,66 @@ double model_objective(const LpModel& m, std::span<const double> x) {
   return s;
 }
 
+namespace {
+
+// Sparse test for large Q: LDL^T of Q (minimization form) with an AMD ordering and no static regularization. Every
+// symmetric permutation of a positive semidefinite matrix has pivots >= 0 in exact arithmetic, and a zero pivot forces
+// its remaining column to zero; if it did not (indefinite Q), the replacement of the tiny pivot makes a later pivot hugely
+// negative, so the smallest pivot is what decides.
+ConvexityReport sparse_convexity(const LpModel& m, double sgn, double rel_tol) {
+  ConvexityReport rep;
+  const Index n = m.n_cols;
+  double scale = 0.0;
+  std::vector<Triplet> t;
+  for (Index j = 0; j < n; ++j) {
+    for (Index p = m.quadratic.col_start[to_size(j)]; p < m.quadratic.col_start[to_size(j) + 1]; ++p) {
+      const double v = sgn * m.quadratic.value[to_size(p)];
+      t.push_back({m.quadratic.row_index[to_size(p)], j, v});
+      scale = std::max(scale, std::fabs(v));
+    }
+  }
+  // Every diagonal entry must exist for the pivot bookkeeping; absent ones are zero.
+  std::vector<char> has_diag(to_size(n), 0);
+  for (const Triplet& tr : t) {
+    if (tr.row == tr.col) has_diag[to_size(tr.row)] = 1;
+  }
+  for (Index j = 0; j < n; ++j) {
+    if (!has_diag[to_size(j)]) t.push_back({j, j, 0.0});
+  }
+  SparseMatrix q;
+  std::string err;
+  if (!SparseMatrix::from_triplets(n, n, std::move(t), &q, &err)) {
+    rep.decided = false;
+    rep.note = "cannot assemble Q: " + err;
+    return rep;
+  }
+  rep.scale = scale;
+  rep.tolerance = rel_tol * std::max(scale, 1e-300);
+  LdlParams params;
+  params.rho = params.delta = 0.0;
+  params.pivot_tol = 1e-13;
+  params.dynamic_delta = 1e-8;
+  SparseLdl ldl(params);
+  if (!ldl.analyze(q, std::vector<signed char>(to_size(n), 1), SparseLdl::Ordering::Amd) || !ldl.factorize(q)) {
+    rep.decided = false;
+    rep.note = "the sparse factorization of Q failed";
+    return rep;
+  }
+  const double minp = ldl.stats().min_pivot;
+  if (minp < -rep.tolerance) {
+    rep.pivot = minp;
+    rep.column = ldl.stats().min_pivot_column;
+    rep.note = "negative pivot " + sci(minp) + " at column " + std::to_string(rep.column) + " (sparse LDL^T)";
+    return rep;
+  }
+  rep.convex = true;
+  rep.rank = n - static_cast<Index>(ldl.stats().dynamic_regularizations);
+  rep.note = "sparse LDL^T";
+  return rep;
+}
+
+}  // namespace
+
 ConvexityReport check_convexity(const LpModel& m, double rel_tol) {
   ConvexityReport rep;
   if (!has_quadratic(m)) {
@@ -71,13 +144,9 @@ ConvexityReport check_convexity(const LpModel& m, double rel_tol) {
     return rep;
   }
   const std::size_t n = to_size(m.n_cols);
-  constexpr std::size_t kDenseLimit = 2500;
-  if (n > kDenseLimit) {
-    rep.decided = false;
-    rep.note = "Q has " + std::to_string(n) + " columns, above the dense limit of " + std::to_string(kDenseLimit);
-    return rep;
-  }
+  constexpr std::size_t kDenseLimit = 1200;
   const double sgn = m.sense == Sense::Maximize ? -1.0 : 1.0;
+  if (n > kDenseLimit) return sparse_convexity(m, sgn, rel_tol);
   // Dense lower triangle, row-major packed: element (i, j), i >= j, at i*(i+1)/2 + j.
   std::vector<double> a(n * (n + 1) / 2, 0.0);
   auto at = [&](std::size_t i, std::size_t j) -> double& { return i >= j ? a[i * (i + 1) / 2 + j] : a[j * (j + 1) / 2 + i]; };
@@ -118,7 +187,7 @@ ConvexityReport check_convexity(const LpModel& m, double rel_tol) {
     if (nd < -tol) {
       rep.pivot = nd;
       rep.column = static_cast<Index>(perm[neg]);
-      rep.note = "negative pivot " + std::to_string(nd) + " at column " + std::to_string(rep.column);
+      rep.note = "negative pivot " + sci(nd) + " at column " + std::to_string(rep.column);
       return rep;
     }
     if (bd <= tol) {
@@ -128,7 +197,7 @@ ConvexityReport check_convexity(const LpModel& m, double rel_tol) {
           if (std::fabs(at(i, j)) > tol) {
             rep.pivot = at(i, j);
             rep.column = static_cast<Index>(perm[i]);
-            rep.note = "zero pivots but a nonzero entry " + std::to_string(at(i, j)) + " in the remaining block (columns " +
+            rep.note = "zero pivots but a nonzero entry " + sci(at(i, j)) + " in the remaining block (columns " +
                        std::to_string(perm[i]) + " and " + std::to_string(perm[j]) + "): indefinite";
             return rep;
           }

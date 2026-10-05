@@ -359,3 +359,33 @@ TEST_CASE(convexity_agrees_with_random_gram_and_perturbed_matrices) {
   }
   std::cout << "  convexity: " << psd << " Gram matrices accepted, " << indef << " perturbed ones rejected\n";
 }
+
+TEST_CASE(convexity_of_a_large_q_uses_the_sparse_factorization) {
+  // Path-graph Laplacian (PSD, singular) with 1500 columns, above the dense limit of 1200.
+  const Index n = 1500;
+  std::vector<Triplet> lap;
+  for (Index i = 0; i < n; ++i) {
+    lap.push_back({i, i, i == 0 || i == n - 1 ? 1.0 : 2.0});
+    if (i + 1 < n) lap.push_back({i + 1, i, -1.0});
+  }
+  ConvexityReport r = check_convexity(model_with_q(n, lap));
+  CHECK(r.decided);
+  CHECK(r.convex);
+  // Strictly diagonally dominant version: positive definite.
+  std::vector<Triplet> pd = lap;
+  for (Triplet& t : pd) {
+    if (t.row == t.col) t.value += 0.5;
+  }
+  r = check_convexity(model_with_q(n, pd));
+  CHECK(r.convex);
+  CHECK_EQ(r.rank, n);
+  // One negative diagonal entry makes it indefinite; the column is reported.
+  std::vector<Triplet> bad = lap;
+  bad[to_size(2 * 700)].value = -0.5;  // the diagonal entry of column 700
+  r = check_convexity(model_with_q(n, bad));
+  CHECK(!r.convex);
+  CHECK(r.decided);
+  CHECK(r.pivot < 0.0);
+  // The same matrix as a maximization problem: -Q is then what must be PSD, and the negated Laplacian is not.
+  CHECK(!check_convexity(model_with_q(n, lap, Sense::Maximize)).convex);
+}
