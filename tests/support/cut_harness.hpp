@@ -12,7 +12,7 @@
 namespace shodhan::testing {
 
 /// The minimization form of a model (costs and offset negated for a maximization model).
-LpModel min_form(const LpModel& m);
+LpModel cut_min_form(const LpModel& m);  // named apart from mip_harness.hpp's inline min_form: one symbol, one definition (MSVC link)
 
 struct CutRunResult {
   bool ran = false;               ///< the root LP was optimal

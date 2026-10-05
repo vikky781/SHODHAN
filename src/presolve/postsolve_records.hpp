@@ -133,16 +133,16 @@ class DoubletonRecord final : public PostsolveRecord {
 /// that stands for z = x_j + x_k. Primal recovery only: x_j = max(l_j, z - u_k), x_k = z - x_j.
 class DuplicateColumnRecord final : public PostsolveRecord {
  public:
-  DuplicateColumnRecord(int keep, int gone, double lo_keep, double up_keep, double lo_gone, double up_gone,
+  DuplicateColumnRecord(int keep, int gone, double lo_keep, double up_keep, [[maybe_unused]] double lo_gone, double up_gone,
                         bool integer)
-      : keep_(keep), gone_(gone), lo_keep_(lo_keep), up_keep_(up_keep), lo_gone_(lo_gone), up_gone_(up_gone),
+      : keep_(keep), gone_(gone), lo_keep_(lo_keep), up_keep_(up_keep), up_gone_(up_gone),
         integer_(integer) {}
   void undo(PostsolveState& s) const override;
 
  private:
   int keep_;
   int gone_;
-  double lo_keep_, up_keep_, lo_gone_, up_gone_;
+  double lo_keep_, up_keep_, up_gone_;  // the lower bound of the merged-away column is not needed to undo the merge
   bool integer_;
 };
 

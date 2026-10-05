@@ -9,7 +9,7 @@
 
 namespace shodhan::testing {
 
-LpModel min_form(const LpModel& m) {
+LpModel cut_min_form(const LpModel& m) {
   LpModel out = m;
   if (m.sense == Sense::Maximize) {
     for (double& c : out.col_cost) c = -c;
@@ -22,7 +22,7 @@ LpModel min_form(const LpModel& m) {
 CutRunResult run_cut_loop_on(const LpModel& model, const mip::MipOptions& options, bool use_structure,
                              bool keep_candidates) {
   CutRunResult r;
-  r.pm = min_form(model);
+  r.pm = cut_min_form(model);
   const LpModel& pm = r.pm;
   r.lo = pm.col_lower;
   r.hi = pm.col_upper;
