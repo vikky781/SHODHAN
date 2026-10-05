@@ -73,6 +73,7 @@ CutLoopResult run_root_cut_loop(const CutLoopInput& in) {
     data.hi = in.hi;
     data.x = &x;
     data.structure = in.structure;
+    data.detected = in.detected;
     data.engine = &e;
     data.scaling = &sc;
     data.options = &o;

@@ -18,6 +18,7 @@
 #include "shodhan/presolve.hpp"
 #include "shodhan/scaling.hpp"
 #include "shodhan/simplex_engine.hpp"
+#include "shodhan/structure.hpp"
 
 namespace shodhan::mip {
 
@@ -69,6 +70,7 @@ struct CutData {
   const std::vector<double>* hi = nullptr;
   const std::vector<double>* x = nullptr;   ///< LP solution, unscaled, all columns
   const MipPresolveInfo* structure = nullptr;
+  const StructureInfo* detected = nullptr;  ///< variable-upper-bound and balance rows of the model (null: not used)
   SimplexEngine* engine = nullptr;       ///< at the LP optimum; used for tableau rows (Gomory)
   const Scaling* scaling = nullptr;      ///< scaling between the engine's space and the unscaled one
   const MipOptions* options = nullptr;
@@ -117,6 +119,7 @@ struct CutLoopInput {
   const std::vector<double>* lo = nullptr;
   const std::vector<double>* hi = nullptr;
   const MipPresolveInfo* structure = nullptr;
+  const StructureInfo* detected = nullptr;
   SimplexEngine* engine = nullptr;       ///< at the optimum of the LP without cuts
   const Scaling* scaling = nullptr;
   const MipOptions* options = nullptr;

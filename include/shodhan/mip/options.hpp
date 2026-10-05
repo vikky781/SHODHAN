@@ -83,10 +83,15 @@ struct MipOptions {
   bool cut_gomory = true, cut_mir = true, cut_cover = true, cut_clique = true, cut_implied_bound = true;
   /// Without presolve, compute cliques and implications by probing the model before the root cut loop.
   bool cut_structure = true;
+  /// MIR aggregation uses the detected variable-upper-bound rows as variable bounds and prefers flow-balance rows when it
+  /// eliminates a continuous column (docs/STRUCTURE.md).
+  bool cut_structure_aware = true;
 
   // ---- pipeline ----
   bool presolve = true;
   bool probing = true;  ///< probing in the MIP presolve (implications and cliques for the cuts)
+  /// Big-M tightening of variable-upper-bound and indicator rows with the implied bounds of the propagation (docs/STRUCTURE.md).
+  bool implied_bound_tightening = true;
   bool scaling = true;
   /// Dual simplex iteration limit for one node LP before it counts as numerical trouble.
   long long node_iteration_limit = 1000000;

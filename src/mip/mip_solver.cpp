@@ -17,6 +17,7 @@
 #include "shodhan/mip/plugins.hpp"
 #include "shodhan/mip/search_state.hpp"
 #include "shodhan/presolve.hpp"
+#include "shodhan/structure.hpp"
 #include "shodhan/scaling.hpp"
 #include "shodhan/simplex_engine.hpp"
 
@@ -92,6 +93,7 @@ class Search {
   std::unique_ptr<SimplexEngine> engine_;
   SimplexOptions so_;
   MipPresolveInfo structure_;
+  StructureInfo detected_;  // rows of the presolved model with a recognised structure (variable upper bounds, balances)
   bool cuts_done_ = false;
   CutStats cut_stats_;
   bool cuts_abandoned_ = false, cuts_infeasible_ = false;
@@ -143,6 +145,7 @@ bool Search::setup_presolve(MipResult& res) {
     po.is_mip = true;
     po.need_duals = false;
     po.probing = opt_.probing;
+    po.implied_bound_tightening = opt_.implied_bound_tightening;
     pre_ = presolve(original_, po);
     presolved_ = true;
     res.presolve_rows_before = original_.n_rows;
@@ -376,11 +379,13 @@ Search::CutOutcome Search::run_root_cuts() {
     po.is_mip = true;
     structure_ = find_mip_structure(pm_, po);
   }
+  if (opt_.cut_structure_aware) detected_ = detect_structure(pm_);
   CutLoopInput in;
   in.model = &pm_;
   in.lo = &root_lo_;
   in.hi = &root_hi_;
   in.structure = &structure_;
+  in.detected = opt_.cut_structure_aware ? &detected_ : nullptr;
   in.engine = engine_.get();
   in.scaling = &sc_;
   in.options = &opt_;

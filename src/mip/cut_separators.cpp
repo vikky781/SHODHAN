@@ -271,9 +271,20 @@ class MirSeparator final : public Separator {
     const Index n = M_->n_cols;
     vub_.assign(u(n), {});
     vlb_.assign(u(n), {});
-    if (d_->structure == nullptr) return;
     const std::vector<double>& lo = *d_->lo;
     const std::vector<double>& hi = *d_->hi;
+    // Detected variable-upper-bound rows are variable bounds of their own: x <= u y, or x <= u - u y.
+    if (d_->detected != nullptr) {
+      for (const VubRow& v : d_->detected->vubs) {
+        if (M_->is_integer(v.x) || !is_binary_col(*M_, lo, hi, v.y)) continue;
+        VarBound vb;
+        vb.xb = v.y;
+        vb.c0 = v.complemented ? v.u : 0.0;
+        vb.c1 = v.complemented ? -v.u : v.u;
+        vub_[u(v.x)].push_back(vb);
+      }
+    }
+    if (d_->structure == nullptr) return;
     for (const Implication& im : d_->structure->implications) {
       const Index y = im.other;
       const Index b = im.var;
@@ -333,6 +344,7 @@ class MirSeparator final : public Separator {
       Index best_row = -1;
       double best_sign = 0.0, best_slack = kInf;
       Index best_len = 0;
+      bool best_balance = false;
       for (Index t = A.col_start[u(j)]; t < A.col_start[u(j) + 1]; ++t) {
         const Index r = A.row_index[u(t)];
         if (std::find(used.begin(), used.end(), r) != used.end()) continue;
@@ -345,11 +357,16 @@ class MirSeparator final : public Separator {
           const double e = sign * A.value[u(t)];
           if (e * agg[j] >= 0.0) continue;
           const Index len = d_->rows->row_start[u(r) + 1] - d_->rows->row_start[u(r)];
-          if (slack < best_slack - 1e-12 || (std::fabs(slack - best_slack) <= 1e-12 && len < best_len)) {
+          // Among rows equally tight, a flow-balance row is preferred (the aggregation then follows the conservation
+          // rows, which keeps the continuous flow variables together), then the shorter row.
+          const bool balance = d_->detected != nullptr && u(r) < d_->detected->is_balance_row.size() && d_->detected->is_balance_row[u(r)] != 0;
+          const bool tie = std::fabs(slack - best_slack) <= 1e-12;
+          if (slack < best_slack - 1e-12 || (tie && ((balance && !best_balance) || (balance == best_balance && len < best_len)))) {
             best_row = r;
             best_sign = sign;
             best_slack = slack;
             best_len = len;
+            best_balance = balance;
           }
         }
       }

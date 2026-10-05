@@ -35,6 +35,7 @@ int usage_error(const std::string& message) {
                "                           [--branching reliability|pseudocost|mostfrac|first]\n"
                "                           [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n"
                "                           [--presolve on|off] [--probing on|off] [--cuts on|off] [--cut-rounds n]\n"
+               "                           [--structure on|off]\n"
                "                     LP/QP: [--method auto|simplex|ipm|ipm-crossover] [--ipm-tol t]\n";
   return kExitUsage;
 }
@@ -121,7 +122,7 @@ int run_solve(const std::vector<std::string>& args) {
         if (value != "on" && value != "off") return usage_error("--heuristics needs on or off");
         mopt.heuristics = value == "on";
       }
-    } else if (a == "--presolve" || a == "--probing" || a == "--cuts") {
+    } else if (a == "--presolve" || a == "--probing" || a == "--cuts" || a == "--structure") {
       if (i + 1 >= args.size()) return usage_error(a + " needs on or off");
       const std::string value = args[++i];
       if (value != "on" && value != "off") return usage_error(a + " needs on or off");
@@ -130,6 +131,9 @@ int run_solve(const std::vector<std::string>& args) {
         opt.presolve = on;
       } else if (a == "--probing") {
         mopt.probing = on;
+      } else if (a == "--structure") {
+        mopt.implied_bound_tightening = on;
+        mopt.cut_structure_aware = on;
       } else {
         mopt.cuts = on;
       }

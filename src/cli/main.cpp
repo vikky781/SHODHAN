@@ -39,6 +39,7 @@ void print_usage(std::ostream& out) {
       << "                       [--branching reliability|pseudocost|mostfrac|first]\n"
       << "                       [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n"
       << "                       [--presolve on|off] [--probing on|off] [--cuts on|off] [--cut-rounds n]\n"
+      << "                       [--structure on|off]\n"
       << "                       [--method auto|simplex|ipm|ipm-crossover] [--ipm-tol t]\n"
       << "                             solve an LP (presolve, scaling, dual simplex, KKT check on\n"
       << "                             the original model) or a MILP (branch and bound with\n"
