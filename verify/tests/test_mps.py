@@ -125,6 +125,13 @@ ENDATA
         with self.assertRaises(MpsError):
             parse(FREE.replace("ROWS", "OBJSENSE\n    SIDEWAYS\nROWS", 1))
 
+    def test_integer_marker_lines_with_the_usual_names_are_recognized(self):
+        # MIPLIB writes MARK0000 / MARK0001 as the name, not the word MARKER.
+        lines = ["NAME M", "ROWS", " N  OBJ", " L  R1", "COLUMNS", "    MARK0000  'MARKER'                 'INTORG'",
+                 "    B  OBJ 2  R1 1", "    MARK0001  'MARKER'                 'INTEND'", "    D  OBJ 4  R1 1", "RHS", "    RHS  R1 100", "ENDATA", ""]
+        m = parse(chr(10).join(lines))
+        self.assertEqual(m.n_integer, 1)
+
     def test_integer_markers_and_bound_types(self):
         text = """NAME M
 ROWS

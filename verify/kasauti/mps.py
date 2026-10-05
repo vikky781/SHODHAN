@@ -177,6 +177,11 @@ def _has_space(names):
     return any(" " in n for n in names)
 
 
+def _is_marker(toks):
+    """An integer marker line: name, 'MARKER' (the quotes are the usual spelling, bare MARKER is also accepted), 'INTORG'/'INTEND'."""
+    return len(toks) == 3 and toks[1].strip("'").upper() == "MARKER"
+
+
 def parse_mps(data, exact=True):
     """Parses MPS file bytes into a Model."""
     text = decode(data)
@@ -216,7 +221,7 @@ def parse_mps(data, exact=True):
     for kw, _, data_lines in sections:
         if kw in ("ROWS", "COLUMNS", "RHS", "RANGES", "BOUNDS") + _QUAD_SECTIONS:
             for ln in data_lines:
-                if kw == "COLUMNS" and "MARKER" in ln.raw.split():
+                if kw == "COLUMNS" and _is_marker(ln.raw.split()):
                     continue
                 layout_lines.append((kw, ln))
     fixed = False
@@ -237,7 +242,7 @@ def parse_mps(data, exact=True):
         """Yields (line number, fields) with the fields of each data line as the section expects."""
         for ln in data_lines:
             toks = ln.raw.split()
-            if kw == "COLUMNS" and "MARKER" in toks:
+            if kw == "COLUMNS" and _is_marker(toks):
                 yield ln.no, ("MARKER", toks)
             elif fixed:
                 if kw == "ROWS":
