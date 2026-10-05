@@ -22,6 +22,12 @@ import re
 import sys
 import tempfile
 import unittest
+
+
+def read_file(path):
+    with open(path, "rb") as f:
+        return f.read()
+
 import hashlib
 from fractions import Fraction as F
 
@@ -224,7 +230,7 @@ class QpMutationTests(unittest.TestCase):
         rng = self.rng
         self.assertGreaterEqual(len(self.items), 150)
         for mps, cert in rng.sample(self.items, min(len(self.items), 120)):
-            model = parse_mps(open(mps, "rb").read(), exact=True)
+            model = parse_mps(read_file(mps), exact=True)
             orc = QpOracle(model)
             x0 = dense(model.col_names, cert["x"])
             y0 = dense(model.row_names, cert["y"])
@@ -269,7 +275,7 @@ class QpMutationTests(unittest.TestCase):
             self.record("claimed objective", "harmful", self.run_verifier(mps, c2))
             # --- mutations of the quadratic term in a copy of the model file (the hash in the certificate is updated, so the
             # corruption must be caught by the numbers, not by the hash) ---
-            text = open(mps, "rb").read().decode()
+            text = read_file(mps).decode()
             lines = text.split("\n")
             try:
                 start = lines.index("QUADOBJ")
