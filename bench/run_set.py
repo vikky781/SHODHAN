@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs `shodhan solve` on every .mps file of a directory (LPs and MILPs) and collects the results.
+"""Runs `shodhan solve` on every .mps / .qps file of a directory (LPs, MILPs and QPs, any letter case) and collects the results.
 
 Standard library only. Usage:
 
@@ -13,7 +13,8 @@ file (given by you) has two columns, name and optimal objective; a solved instan
 objective differs from the reference by more than rel-tol * (1 + |reference|) counts as a mismatch. No
 reference values are built in. Instances that stop at a limit (NodeLimit, TimeLimit, Timeout) are counted
 as "limit", not as failures; every other status that is not Optimal is a failure.
-Exit status: 0 when nothing failed and nothing mismatched, 1 otherwise.
+Instances reported as NonConvex (the solver found Q indefinite) and NumericalError are counted separately from
+other failures. Exit status: 0 when nothing failed and nothing mismatched, 1 otherwise.
 """
 import argparse
 import csv
@@ -24,6 +25,7 @@ import sys
 import time
 
 LIMIT_STATUSES = ("NodeLimit", "TimeLimit", "Timeout", "IterationLimit")
+EXTENSIONS = (".mps", ".qps")
 
 
 def parse_output(text):
@@ -102,15 +104,15 @@ def main(argv=None):
     if not os.path.exists(exe):
         print("executable not found: " + exe)
         return 1
-    files = sorted(f for f in os.listdir(args.directory) if f.lower().endswith(".mps"))
+    files = sorted(f for f in os.listdir(args.directory) if f.lower().endswith(EXTENSIONS))
     if not files:
-        print("no .mps files in " + args.directory)
+        print("no .mps or .qps files in " + args.directory)
         return 1
     ref = read_reference(args.reference) if args.reference else {}
-    solved = limit = failed = mismatch = missing_ref = 0
+    solved = limit = failed = mismatch = missing_ref = nonconvex = numerical = 0
     rows = []
     for fname in files:
-        name = fname[:-4]
+        name = fname[:-4]  # both extensions have four characters
         cmd = [exe, "solve", os.path.join(args.directory, fname)] + args.extra
         t0 = time.time()
         try:
@@ -141,8 +143,12 @@ def main(argv=None):
                         note = "unreadable objective"
         elif status in LIMIT_STATUSES:
             limit += 1
+        elif status == "NonConvex":
+            nonconvex += 1
         else:
             failed += 1
+            if status == "NumericalError":
+                numerical += 1
         rows.append([name, status, info["objective"], info["bound"], info["gap"], info["nodes"], info["iterations"],
                      "%.3f" % secs, info["primal"], info["dual"], info["compl"], info["kkt_gap"], code, note,
                      info["presolve"], info["cuts_added"], info["cuts_kept"], info["root_no_cuts"], info["root_cuts"],
@@ -156,8 +162,8 @@ def main(argv=None):
                     "primal_rel", "dual_rel", "compl_rel", "kkt_gap_rel", "exit_code", "note", "presolve_size",
                     "cuts_added", "cuts_kept", "root_bound_no_cuts", "root_bound_cuts", "root_gap_closed_percent"])
         w.writerows(rows)
-    print("\nsolved %d, stopped at a limit %d, failed (any other status) %d, mismatches %d%s; results in %s" %
-          (solved, limit, failed, mismatch, (", without reference %d" % missing_ref) if ref else "", args.csv))
+    print("\nsolved %d, stopped at a limit %d, NonConvex %d, failed (any other status) %d (of which NumericalError %d), mismatches %d%s; results in %s" %
+          (solved, limit, nonconvex, failed, numerical, mismatch, (", without reference %d" % missing_ref) if ref else "", args.csv))
     return 0 if failed == 0 and mismatch == 0 else 1
 
 

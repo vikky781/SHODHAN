@@ -33,6 +33,9 @@ FORBIDDEN_EXACT = {
     # SuiteSparse components that are easy to pull in under their own names.
     "klu", "csparse", "cxsparse", "colamd", "ccolamd", "camd",
 }
+# Header file names of libraries whose names are too common as tokens (the project has its own sparse_ldl.hpp and amd.cpp):
+# matched against the base name of an #include.
+FORBIDDEN_HEADERS = {"ldl.h", "ldl.hpp", "amd.h", "amd_internal.h", "cholmod.h", "ldl_internal.h"}
 # Names matched as token prefixes (case-insensitive), e.g. cusolverDn.h.
 FORBIDDEN_PREFIX = (
     "coinor", "ortools", "suitesparse", "cholmod", "umfpack", "cusolver",
@@ -130,6 +133,8 @@ def check_includes(verbose, problems):
             for lineno, line in enumerate(f, 1):
                 m = INCLUDE_RE.match(line)
                 if m:
+                    if os.path.basename(m.group(1)).lower() in FORBIDDEN_HEADERS:
+                        problems.append("%s:%d: #include of forbidden library header (%s)" % (rel, lineno, m.group(1)))
                     for name in forbidden_in(m.group(1)):
                         problems.append(
                             "%s:%d: #include of forbidden library '%s' (%s)"

@@ -35,7 +35,10 @@
       "environment": {
         "SHODHAN_MIP_SEED_COUNT": "150",
         "SHODHAN_CUT_SEEDS": "12",
-        "SHODHAN_CUT_PIPE_SEEDS": "20"
+        "SHODHAN_CUT_PIPE_SEEDS": "20",
+        "SHODHAN_QP_SEEDS": "150",
+        "SHODHAN_QP_PIPE_SEEDS": "120",
+        "SHODHAN_LP_AGREE_SEEDS": "30"
       }
     }
   ]
