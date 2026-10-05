@@ -72,4 +72,9 @@ The IPM finds an interior solution; there is no crossover (not implemented).
 - IPM duals are floating-point numbers with noise on free columns, so KASAUTI usually proves optimality only to
   tolerance for them ([CERTIFICATES.md](CERTIFICATES.md)). `ipm_tol` in the facade is 1e-9 (the target of the
   specification was 1e-8) because at 1e-8 the noise made two corpus certificates fail the exact check.
+- Platform sensitivity: in CI one compiler (MSVC) ended seed 54 of the wide-coefficient QP family with `NumericalError: non-finite Newton direction`
+  after all retries, while the same seed passes with GCC on Linux and MinGW, including a build with FMA contraction. It could not be reproduced
+  locally and its cause is not known. A fourth, more conservative retry (regularization 1e-4, step fraction 0.8, no centrality correctors) was added;
+  whether it helps on that compiler is checked by CI. The planted-QP test therefore separates a WRONG answer (never allowed) from an honest
+  `NumericalError` (counted, capped at 0.25% of the seeds, printed). The two LP seeds 540183 and 540277 end the same way on every platform.
 - No handling of dense columns or rows beyond what the ordering gives.

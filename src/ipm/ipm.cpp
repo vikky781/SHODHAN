@@ -661,12 +661,16 @@ IpmResult solve_ipm(const LpModel& model, const IpmOptions& options) {
   res.attempts = 1;
   if (res.status != Status::NumericalError) return res;
   IpmOptions o = options;
-  const double reg[] = {1e-8, 1e-6};
+  const double reg[] = {1e-8, 1e-6, 1e-4};
   for (const double r : reg) {
     o.rho = std::max(options.rho, r);
     o.delta = std::max(options.delta, r);
     o.theta_floor = std::max(options.theta_floor, r * 1e-2);
     o.step_fraction = std::min(options.step_fraction, 0.9);
+    if (r >= 1e-4) {  // last resort: shorter steps and no centrality correctors (found necessary on one platform in CI)
+      o.step_fraction = std::min(options.step_fraction, 0.8);
+      o.centrality_correctors = 0;
+    }
     IpmResult next = solve_ipm_attempt(model, o);
     next.attempts = res.attempts + 1;
     next.seconds += res.seconds;
