@@ -1,0 +1,17 @@
+# SYNTHETIC test instance: invented numbers (not from any publication).
+name single_pool_58
+synthetic yes
+qualities 1 S
+source S1 12 30.625 2.875
+source S2 17 inf 1.25
+source S3 15 inf 2.25
+source S4 13 52 4
+pool P 59.5
+terminal T1 25 62.25 2.625
+arc S1 P
+arc S2 P
+arc S3 P
+arc S4 P
+arc P T1
+arc S3 T1
+arc S4 T1

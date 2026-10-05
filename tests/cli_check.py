@@ -209,6 +209,30 @@ def main():
     check("solve --method barrier is a usage error (1)", rc == 1, err)
     rc, _, err = run(exe, "solve", qp, "--ipm-tol", "0")
     check("solve --ipm-tol 0 is a usage error (1)", rc == 1, err)
+    # ---- pooling (SYNTHETIC instances) ----
+    pool = os.path.join(models, "pool_synth_one_pool.pool")
+    rc, out, _ = run(exe, "pool", pool, "--starts", "4")
+    check("pool on a synthetic instance: Converged, exit 0, SYNTHETIC notice, local value, McCormick bound and the no-guarantee statement",
+          rc == 0 and "Status:        Converged" in out and "SYNTHETIC" in out and "Local value:" in out and "McCormick bound:" in out and "NO global-optimality guarantee" in out, repr((rc, out[-500:])))
+    rc, out, _ = run(exe, "pool", pool, "--method", "slp", "--starts", "4")
+    check("pool --method slp converges and reports the check against the nonlinear model", rc == 0 and "Check:         original nonlinear model" in out, repr((rc, out[-300:])))
+    rc, out, _ = run(exe, "pool", os.path.join(models, "pool_cycling.pool"), "--damping", "1", "--starts", "1", "--no-bound")
+    check("pool with an undamped recursion that cycles reports Cycling and exit 4 (a feasible point, not a converged solution)",
+          rc == 4 and "Status:        Cycling" in out and "NOT a converged solution" in out, repr((rc, out[-400:])))
+    rc, out, err = run(exe, "pool", os.path.join(models, "pool_synth_one_pool.pool"), "--method", "newton")
+    check("pool --method newton is a usage error (1)", rc == 1, repr((rc, err)))
+    with tempfile.TemporaryDirectory() as d:
+        bad = os.path.join(d, "bad.pool")
+        with open(bad, "w") as f:
+            f.write("qualities 1" + chr(10) + "source A 5 inf" + chr(10))
+        rc, out, err = run(exe, "pool", bad)
+        check("pool on a malformed file names the line and exits 1", rc == 1 and "bad.pool:2:" in err, repr((rc, err)))
+        solp, certp = os.path.join(d, "s.sol"), os.path.join(d, "c.json")
+        rc, out, _ = run(exe, "pool", pool, "--method", "slp", "--starts", "3", "--write-sol", solp, "--write-cert", certp)
+        check("pool --write-sol and --write-cert write the files", rc == 0 and os.path.exists(solp) and os.path.exists(certp) and '"nonconvex": true' in open(certp).read()
+              and '"optimality_certified": false' in open(certp).read(), repr((rc, out[-300:])))
+    rc, out, _ = run(exe, "pool", pool, "--dump")
+    check("pool --dump prints the parsed problem", rc == 0 and out.startswith("qualities 1") and "arc S1>P" in out, repr((rc, out[:80])))
     gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bench", "gen_mip.py")
     with tempfile.TemporaryDirectory() as md:
         knap = os.path.join(md, "knap.mps")

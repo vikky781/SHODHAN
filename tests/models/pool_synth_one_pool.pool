@@ -1,0 +1,15 @@
+# SYNTHETIC test instance: invented numbers (not from any publication), one pool, one quality.
+name synth_one_pool
+synthetic yes
+qualities 1 S
+source S1 5 inf 4
+source S2 12 inf 1
+source S3 9 inf 2
+pool P 80
+terminal T1 11 60 2.2
+terminal T2 16 40 1.4
+arc S1 P
+arc S2 P
+arc P T1
+arc P T2
+arc S3 T1

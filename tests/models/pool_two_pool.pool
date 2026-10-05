@@ -1,0 +1,25 @@
+# SYNTHETIC test instance: invented numbers (not from any publication).
+name two_pool_3
+synthetic yes
+qualities 2 S N
+source S1 12 56.875 1.75 4
+source S2 9 46.875 5.375 4.375
+source S3 8 inf 4.5 4.875
+source S4 16 68.5 1.5 3.75
+pool P1 51.5
+pool P2 77.375
+terminal T1 21 68.5 4.5 4.125
+terminal T2 23 41.375 4.5 4.5
+arc S1 P1
+arc S1 P2
+arc S2 P1
+arc S2 P2
+arc S3 P1
+arc S3 P2
+arc S4 P1
+arc S4 P2
+arc P1 T1
+arc P1 T2
+arc P2 T1
+arc P2 T2
+arc S2 T2
