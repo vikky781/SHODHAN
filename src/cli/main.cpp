@@ -10,6 +10,7 @@
 #include "dump_model.hpp"
 #include "info.hpp"
 #include "presolve_report.hpp"
+#include "pool_command.hpp"
 #include "solve_command.hpp"
 #include "shodhan/kkt.hpp"
 #include "shodhan/mps.hpp"
@@ -45,6 +46,10 @@ void print_usage(std::ostream& out) {
       << "                             the original model) or a MILP (branch and bound with\n"
       << "                             reliability branching and primal heuristics); a convex QP (QUADOBJ/QMATRIX) is\n"
       << "                             objectives are reported as not implemented\n"
+      << "  shodhan pool <spec.pool> [--method recursion|slp] [--starts N] [--tol t] [--seed s]\n"
+      << "                       [--write-sol path] [--write-cert path]\n"
+      << "                             local solution of a pooling problem (nonconvex) with a McCormick upper\n"
+      << "                             bound; checked against the nonlinear model, never a global guarantee\n"
       << "  shodhan dump-model <file>  print a canonical text form of the parsed model (used to\n"
       << "                             compare readers)\n"
       << "  shodhan --help             show this help\n"
@@ -165,6 +170,7 @@ int run(const std::vector<std::string>& args) {
   }
   if (cmd == "info") return run_info(args);
   if (cmd == "solve") return shodhan::cli::run_solve(args);
+  if (cmd == "pool") return shodhan::cli::run_pool(args);
   if (cmd == "presolve") return run_presolve(args);
   if (cmd == "factor-bench") return shodhan::cli::run_factor_bench(args);
   return usage_error("unknown command '" + cmd + "'");
