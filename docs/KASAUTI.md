@@ -1,6 +1,6 @@
 # KASAUTI: the independent certificate verifier
 
-KASAUTI (`verify/kasauti/`) checks a solver's claim about an LP from the model file and a certificate, using
+KASAUTI (`verify/kasauti/`) checks a solver's claim about an LP or a convex QP from the model file and a certificate, using
 nothing but the Python standard library. It has no access to the solver: it contains its own MPS parser (written
 from the conventions in [MPS_FORMAT.md](MPS_FORMAT.md), not translated from the C++ reader) and does its
 arithmetic in exact rationals (`fractions.Fraction`) or, for very large models, in compensated floating point.
@@ -23,6 +23,7 @@ The solve command prints the certificate path and the verification command. Opti
 | `--ray-tol 1e-9` | relative violation of the recession-cone conditions |
 | `--farkas-zero-tol 1e-12` | retry an infeasibility proof dropping coefficients below this (0 = never) |
 | `--dual-zero-tol 1e-9` | retry an optimality bound dropping multipliers below this (0 = never) |
+| `--psd-cap 120` | largest number of columns for the exact positive-semidefiniteness test of Q; above it convexity is "not verified" and the verdict tolerance-level |
 | `--sol FILE` | check a `.sol` file (feasibility and objective only) |
 | `--report out.json` | machine-readable report |
 
@@ -139,7 +140,18 @@ a column without an upper bound, so no rigorous dual bound exists; that is the d
 defect of the answer. The unbounded certificate of 450165 is tolerance-checked (cone conditions hold at 1e-9), not
 exact. Seed 450741 stays a hypersensitive case: the pipeline may return an honest `NumericalError` on some platforms.
 
+## Quadratic objectives
+
+The parser reads `QUADOBJ` and `QMATRIX` independently of the C++ reader (the differential test compares them on
+generated QPS files). The optimal check uses `d = c + Q' x - A^T y` and the first-order bound of
+[QP.md](QP.md), after an exact test that Q' is positive semidefinite. `FAIL` if it is not. Where the test cannot be
+run (cap, float mode) the verdict is `PASS_OPTIMAL_TOL` with the note "convexity of Q is not verified". Unbounded QP
+certificates are INCONCLUSIVE. Tests: `verify/tests/test_qp_checks.py`, `verify/tests/test_qp_mutations.py` (every
+harmful corruption of a QP certificate must be rejected) and the QP part of the corpus.
+
 ## Limits
+
+- Float mode cannot prove that Q is positive semidefinite.
 
 - Exact mode is used up to 200000 nonzeros; above that the float mode is not a proof.
 - LP optimality, infeasibility and unboundedness are proved. For a MILP only feasibility, integrality and the objective

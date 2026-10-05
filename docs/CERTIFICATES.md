@@ -17,7 +17,7 @@ UTF-8 JSON, one object:
 | `format` | the string `"shodhan-cert"` |
 | `version` | integer, currently `1` |
 | `solver` | `{name, version}` strings |
-| `problem` | `{name, file_sha256, rows, cols, nnz, sense, n_integer}`: `file_sha256` is the SHA-256 (lower-case hex) of the exact bytes of the model file that was read; `sense` is `"min"` or `"max"`; `nnz` counts stored matrix entries |
+| `problem` | `{name, file_sha256, rows, cols, nnz, sense, n_integer}`: `file_sha256` is the SHA-256 (lower-case hex) of the exact bytes of the model file that was read; `sense` is `"min"` or `"max"`; `nnz` counts stored matrix entries; for a model with a quadratic objective also `quadratic` (true) and `q_nnz` (stored entries of the lower triangle of Q), absent otherwise ([QP.md](QP.md)) |
 | `status` | `optimal`, `infeasible`, `unbounded`, `feasible` or `other` |
 | `claimed_objective` | the objective value the solver reports, in the model's own sense (omitted for `infeasible`, `unbounded`, `other`) |
 | `tolerances` | `{primal_tol, dual_tol, kkt_tol}` the solver used |
@@ -33,7 +33,7 @@ integers. A value that is not finite is never written.
 - **`optimal`**: `x` (object, column name to value, nonzeros only) and `y` (object, row name to value, nonzeros
   only). `y` is in the convention of the internal minimization form: for a `max` model the verifier replaces
   the objective `c` by `-c` and checks as for a minimization problem (the same convention as
-  [CONVENTIONS.md](CONVENTIONS.md)). Reduced costs are not in the file: the verifier derives `d = c - A^T y`.
+  [CONVENTIONS.md](CONVENTIONS.md)). Reduced costs are not in the file: the verifier derives `d = c + Q x - A^T y` (`Q = 0` for an LP).
   Also `dual_bound`, the solver's own claim about its multipliers: `{rigorous, available}` and, when a bound
   exists, `{value, dropped, gap_rel}`. It is a claim, not evidence (the verifier recomputes everything), but a
   claim of `rigorous: true` that exact arithmetic refutes makes the certificate FAIL.
@@ -158,11 +158,29 @@ nothing about optimality.
 A `.sol` file written by `shodhan solve --write-sol` (objective line, then `name value`) can be checked for
 primal feasibility and objective only; it carries no optimality evidence.
 
+### Quadratic objectives
+
+For `min offset + c^T x + (1/2) x^T Q x` the `optimal` body is the same (`x`, `y`, `dual_bound`). The verifier derives
+`d = c + Q' x - A^T y` with exact `Q' x`, checks `x` for feasibility, and computes the weak-duality bound with the
+first-order underestimate of the convex term at the certificate's own `x` (`Q'` is the minimization form, see
+[QP.md](QP.md)). The bound is valid only if `Q'` is positive semidefinite, so the verifier tests that exactly
+(symmetric elimination, up to `--psd-cap` columns, *default* 120):
+
+- not positive semidefinite: the certificate fails, whatever the solver claimed;
+- positive semidefinite proven: the verdict can be rigorous;
+- not verified (above the cap, or in float mode): the bound is reported as not rigorous and the verdict is
+  tolerance-level (`PASS_OPTIMAL_TOL`). A certificate that claims `rigorous: true` in this situation is reported
+  as such.
+
+`infeasible` certificates do not involve `Q`. `unbounded` certificates are not supported for a quadratic objective
+(the verifier answers INCONCLUSIVE). Multipliers from the interior-point method carry floating-point noise, so many
+QP certificates pass only at tolerance level; the corpus counts are in the step report.
+
 ## 3. What is and is not certified
 
 Certified (for the model file as read): that the stated `x` is feasible within the reported violation; that the
 optimum is not below `LB(y)`; that an infeasible model has no feasible point (rigorously when the intervals are
-disjoint exactly); that an unbounded model has a feasible point and an improving recession direction.
+disjoint exactly); that an unbounded model has a feasible point and an improving recession direction; for a quadratic objective, optimality within the stated gap, rigorously only when positive semidefiniteness of Q was verified exactly.
 
 Not certified:
 - **Optimality of MILP solutions**: bounds from branch and bound are not part of version 1.
