@@ -88,6 +88,11 @@ void write_certificate(const LpModel& model, const CertificateContext& ctx, cons
   if (status == "optimal") {
     w.key("claimed_objective");
     w.value(r.solution.objective);
+    if (r.quadratic) {
+      // How the solver established convexity of Q: a claim, not evidence (KASAUTI tests it exactly).
+      w.key("convexity");
+      w.value(r.convexity);
+    }
     // The pipeline's own weak-duality bound of the multipliers: rigorous only if no tiny multiplier had to be
     // treated as zero. A claim, not evidence: the verifier recomputes everything.
     w.key("dual_bound");

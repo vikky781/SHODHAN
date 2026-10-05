@@ -24,6 +24,11 @@ test up to 1200 columns, the sparse LDL^T beyond. It works in floating point wit
 evidence, not a proof. A model reported not positive semidefinite gets the status `NonConvex` (exit 3) and is not
 solved. `KASAUTI` repeats the test exactly (section 5).
 
+`ConvexityReport::by_tolerance` is set when the answer depended on the tolerance: always for the sparse test (it factors
+`Q + s I`, `s = 1e-9 max|q|`, so an eigenvalue in `[-s, 0)` passes) and for the dense test when a pivot or an entry of
+absolute value up to the tolerance was treated as zero. `shodhan solve` prints `Convexity: ... within a tolerance`, the result
+carries `convexity = "tolerance"` (else `"float"`), and the certificate repeats it in the `optimal` body.
+
 ## 4. KKT conditions and the dual bound
 
 With `d = c + Q x - A^T y`, the optimality conditions are the LP ones with this `d`: primal feasibility, the sign rules

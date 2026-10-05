@@ -46,6 +46,10 @@ struct ConvexityReport {
   double tolerance = 0.0;
   /// Rank found (number of positive pivots); -1 when not determined (the sparse test).
   Index rank = 0;
+  /// True when "positive semidefinite" was concluded only within the tolerance: the sparse test factors Q + s I with
+  /// s = tolerance (so it can accept an eigenvalue down to -s), and the dense test sets a pivot or an entry of absolute
+  /// value at most `tolerance` to zero. Such an answer is evidence, not a proof: KASAUTI repeats the test exactly.
+  bool by_tolerance = false;
   std::string note;
 };
 

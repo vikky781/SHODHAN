@@ -64,6 +64,10 @@ struct LpResult {
   /// The algorithm that produced the result: "dual simplex", "interior point", "interior point + crossover".
   std::string method_used;
   bool quadratic = false;  ///< the model has a quadratic term
+  /// How convexity of Q was established, for a quadratic model: "float" (the floating-point test found Q positive
+  /// semidefinite with no pivot or entry treated as zero), "tolerance" (it did, but only within the tolerance of
+  /// ConvexityReport::by_tolerance), "not convex". Empty without a quadratic term.
+  std::string convexity;
   /// Interior-point statistics of the accepted (or last) run; `iterations` above counts its iterations.
   long long ipm_nnz_l = 0;
   long long ipm_regularizations = 0;

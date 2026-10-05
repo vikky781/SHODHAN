@@ -386,13 +386,18 @@ LpResult LpSolver::solve(const LpModel& model) const {
       res.message = "convexity of the quadratic term could not be decided: " + cr.note;
       return res;
     }
+    res.convexity = cr.convex ? (cr.by_tolerance ? "tolerance" : "float") : "not convex";
     if (!cr.convex) {
       res.status = Status::NonConvex;
       res.message = "the quadratic term is not positive semidefinite in the minimization form (" + cr.note + ")";
       return res;
     }
   }
-  if (method == LpMethod::Ipm) return solve_with_ipm(model, t_start);
+  if (method == LpMethod::Ipm) {
+    LpResult r = solve_with_ipm(model, t_start);
+    r.convexity = res.convexity;
+    return r;
+  }
 
   struct Config {
     bool presolve, scaling;

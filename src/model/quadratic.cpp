@@ -135,6 +135,7 @@ ConvexityReport sparse_convexity(const LpModel& m, double sgn, double rel_tol) {
     return rep;
   }
   rep.convex = true;
+  rep.by_tolerance = true;  // the shift decides: an eigenvalue in [-s, 0) is accepted
   rep.rank = -1;  // not determined by the shifted factorization
   rep.note = "sparse LDL^T of Q + s I";
   return rep;
@@ -189,6 +190,7 @@ ConvexityReport check_convexity(const LpModel& m, double rel_tol) {
         neg = i;
       }
     }
+    if (nd < 0.0 && nd >= -tol) rep.by_tolerance = true;
     if (nd < -tol) {
       rep.pivot = nd;
       rep.column = static_cast<Index>(perm[neg]);
@@ -196,9 +198,11 @@ ConvexityReport check_convexity(const LpModel& m, double rel_tol) {
       return rep;
     }
     if (bd <= tol) {
+      if (bd != 0.0) rep.by_tolerance = true;
       // All remaining diagonals are zero (within the tolerance): the rest must be zero too.
       for (std::size_t i = k; i < n; ++i) {
         for (std::size_t j = k; j < i; ++j) {
+          if (at(i, j) != 0.0) rep.by_tolerance = true;
           if (std::fabs(at(i, j)) > tol) {
             rep.pivot = at(i, j);
             rep.column = static_cast<Index>(perm[i]);

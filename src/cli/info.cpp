@@ -74,7 +74,7 @@ void print_model_summary(const LpModel& model, const std::vector<std::string>& w
     out << "Quadratic term: " << model.quadratic.nnz() << " nonzeros in the lower triangle of Q (" << diag << " diagonal, "
         << model.quadratic.nnz() - static_cast<std::size_t>(diag) << " off-diagonal), largest |q| " << sci(qmax) << "\n";
     const ConvexityReport cr = check_convexity(model);
-    out << "Convexity:      " << (!cr.decided ? "not decided (" + cr.note + ")" : cr.convex ? (cr.rank >= 0 ? "positive semidefinite (rank " + std::to_string(cr.rank) + ")" : std::string("positive semidefinite within tolerance")) : "NOT convex: " + cr.note) << "\n";
+    out << "Convexity:      " << (!cr.decided ? "not decided (" + cr.note + ")" : cr.convex ? (cr.rank >= 0 ? "positive semidefinite (rank " + std::to_string(cr.rank) + ")" + (cr.by_tolerance ? ", some pivot treated as zero within a tolerance" : "") : std::string("positive semidefinite within a tolerance (sparse test, not proven)")) : "NOT convex: " + cr.note) << "\n";
   }
   if (!warnings.empty()) {
     out << "Warnings (" << warnings.size() << "):\n";

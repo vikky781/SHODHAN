@@ -205,6 +205,7 @@ int run_solve(const std::vector<std::string>& args) {
   if (r.status == Status::Optimal) {
     std::cout << "Objective:     " << num(r.solution.objective) << "\n";
   }
+  if (r.quadratic && !r.convexity.empty()) std::cout << "Convexity:     " << (r.convexity == "tolerance" ? "positive semidefinite within a tolerance (not proven; KASAUTI tests it exactly)" : r.convexity == "float" ? "positive semidefinite (floating-point test)" : r.convexity) << "\n";
   if (!r.method_used.empty()) std::cout << "Method:        " << (r.method_used.empty() ? "dual simplex" : r.method_used) << (r.quadratic ? " (quadratic objective)" : "") << "\n";
   if (r.method_used.rfind("interior point", 0) == 0) {
     std::cout << "Iterations:    " << r.iterations << " interior-point iterations, " << r.ipm_factorizations << " factorizations in the last run, nnz(L) " << r.ipm_nnz_l

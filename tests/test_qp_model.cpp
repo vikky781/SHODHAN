@@ -296,6 +296,7 @@ LpModel model_with_q(Index n, const std::vector<Triplet>& lower, Sense sense = S
 TEST_CASE(convexity_positive_definite_semidefinite_and_indefinite) {
   // PD: [[2,1],[1,2]].
   ConvexityReport r = check_convexity(model_with_q(2, {{0, 0, 2.0}, {1, 0, 1.0}, {1, 1, 2.0}}));
+  CHECK(!r.by_tolerance);  // positive definite, no pivot treated as zero
   CHECK(r.convex);
   CHECK_EQ(r.rank, Index{2});
   // PSD of rank one: [[1,1],[1,1]].
@@ -371,6 +372,7 @@ TEST_CASE(convexity_of_a_large_q_uses_the_sparse_factorization) {
   ConvexityReport r = check_convexity(model_with_q(n, lap));
   CHECK(r.decided);
   CHECK(r.convex);
+  CHECK(r.by_tolerance);  // Q + s I decides: recorded as convexity "tolerance"
   // Strictly diagonally dominant version: positive definite.
   std::vector<Triplet> pd = lap;
   for (Triplet& t : pd) {
