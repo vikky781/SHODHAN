@@ -29,7 +29,11 @@ void EmptyColumnRecord::undo(PostsolveState& s) const {
 
 void FixedColumnRecord::undo(PostsolveState& s) const {
   s.x[u(col_)] = value_;
-  if (s.duals) s.d[u(col_)] = reduced_cost_without(cost_, entries_, -1, s.y);
+  if (s.duals) {
+    double d = reduced_cost_without(cost_, entries_, -1, s.y) + qdiag_ * value_;
+    for (const auto& q : qentries_) d += q.second * s.x[u(q.first)];  // d = c + Q x - A^T y with x of the neighbours restored
+    s.d[u(col_)] = d;
+  }
 }
 
 // M_{k+1} dual d' = c_j - A_rest^T y for column j. Row i adds a * y_i, so

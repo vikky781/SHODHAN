@@ -45,6 +45,10 @@ class WorkModel {
   std::vector<double> rl, ru, cl, cu, cost;
   double offset = 0.0;
   std::vector<char> is_int;
+  /// Quadratic term in the minimization form, per column the neighbours of the symmetric Q (both triangles, the
+  /// diagonal entry included); empty vectors when the model is an LP.
+  std::vector<std::vector<Entry>> qcols;
+  bool has_q = false;
   std::vector<char> row_alive, col_alive;
   std::vector<char> row_dirty, col_dirty;
   std::vector<int> row_cnt, col_cnt;  // alive entries per row / column

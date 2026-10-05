@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 
+#include "shodhan/quadratic.hpp"
 #include "shodhan/rays.hpp"
 #include "shodhan/scaling.hpp"
 #include "shodhan/simplex_engine.hpp"
@@ -246,7 +247,118 @@ Attempt run_attempt(const LpModel& model, const LpOptions& opt, bool use_presolv
   return a;
 }
 
+// d = c + Q x - A^T y in the minimization form, from the original model: after a postsolve of a QP this is what the
+// KKT check recomputes anyway, and the multipliers returned to the caller must agree with it.
+void recompute_reduced_costs(const LpModel& model, Solution& s) {
+  const double sgn = model.sense == Sense::Maximize ? -1.0 : 1.0;
+  std::vector<double> aty(to_size(model.n_cols), 0.0), qx(to_size(model.n_cols), 0.0);
+  model.A.multiply_transpose(s.y, aty);
+  if (has_quadratic(model)) quad_multiply(model.quadratic, s.x, qx);
+  s.d.assign(to_size(model.n_cols), 0.0);
+  for (std::size_t j = 0; j < to_size(model.n_cols); ++j) s.d[j] = sgn * model.col_cost[j] + sgn * qx[j] - aty[j];
+}
+
+struct IpmAttempt {
+  Attempt a;
+  IpmResult ipm;
+};
+
+IpmAttempt run_ipm_attempt(const LpModel& model, const LpOptions& opt, bool use_presolve, bool use_scaling, double tight, double time_left) {
+  IpmAttempt out;
+  Attempt& a = out.a;
+  const LpModel* work = &model;
+  PresolveResult pre;
+  if (use_presolve) {
+    const auto t0 = Clock::now();
+    PresolveOptions po;
+    po.need_duals = true;
+    pre = presolve(model, po);
+    a.t_presolve = seconds_since(t0);
+    a.pstats = pre.stats;
+    a.presolve_ran = true;
+    switch (pre.status) {
+      case PresolveStatus::Infeasible:
+        a.status = Status::Infeasible;
+        a.needs_confirm = true;
+        a.note = "presolve: Infeasible" + (pre.note.empty() ? std::string() : " (" + pre.note + ")");
+        return out;
+      case PresolveStatus::Unbounded:
+        a.status = Status::Unbounded;
+        a.needs_confirm = true;
+        a.note = "presolve: Unbounded";
+        return out;
+      case PresolveStatus::InfeasibleOrUnbounded:
+        a.status = Status::InfeasibleOrUnbounded;
+        a.needs_confirm = true;
+        a.note = "presolve: InfeasibleOrUnbounded";
+        return out;
+      case PresolveStatus::SolvedByPresolve:
+        a.solution = postsolve(pre.stack, Solution{});
+        recompute_reduced_costs(model, a.solution);
+        accept_optimal(a, model, opt.kkt_tol);
+        a.note = "solved by presolve";
+        return out;
+      case PresolveStatus::Reduced:
+        work = &pre.reduced;
+        break;
+    }
+  }
+  Scaling sc;
+  LpModel scaled_storage;
+  const LpModel* eng_model = work;
+  if (use_scaling) {
+    const auto t0 = Clock::now();
+    sc = compute_scaling(*work);
+    scaled_storage = apply_scaling(*work, sc);
+    eng_model = &scaled_storage;
+    a.t_scaling = seconds_since(t0);
+  }
+  IpmOptions io;
+  io.tol = opt.ipm_tol * tight;
+  io.max_iterations = opt.ipm_max_iterations;
+  io.time_limit = is_inf(opt.params.time_limit) ? kInf : std::max(time_left, 0.0);
+  io.verbosity = opt.params.verbosity >= 2 ? 1 : 0;
+  io.log = opt.log;
+  const auto t0 = Clock::now();
+  out.ipm = solve_ipm(*eng_model, io);
+  a.t_simplex = seconds_since(t0);
+  a.iterations = out.ipm.iterations;
+  a.status = out.ipm.status;
+  if (out.ipm.status == Status::Optimal) {
+    Solution sol = out.ipm.solution;
+    if (use_scaling) sol = unscale_solution(sc, sol);
+    if (use_presolve) sol = postsolve(pre.stack, sol);
+    recompute_reduced_costs(model, sol);
+    sol.objective = model_objective(model, sol.x);
+    a.solution = sol;
+    accept_optimal(a, model, opt.kkt_tol);
+  } else if (out.ipm.status == Status::NumericalError) {
+    a.message = "interior point: " + out.ipm.message;
+  }
+  return out;
+}
+
 }  // namespace
+
+const char* to_string(LpMethod method) noexcept {
+  switch (method) {
+    case LpMethod::Auto: return "auto";
+    case LpMethod::Simplex: return "simplex";
+    case LpMethod::Ipm: return "ipm";
+    case LpMethod::IpmCrossover: return "ipm-crossover";
+  }
+  return "auto";
+}
+
+bool parse_method(const std::string& name, LpMethod* out) {
+  for (const LpMethod m : {LpMethod::Auto, LpMethod::Simplex, LpMethod::Ipm, LpMethod::IpmCrossover}) {
+    if (name == to_string(m)) {
+      *out = m;
+      return true;
+    }
+  }
+  return false;
+}
 
 LpResult LpSolver::solve(const LpModel& model) const {
   const auto t_start = Clock::now();
@@ -257,6 +369,30 @@ LpResult LpSolver::solve(const LpModel& model) const {
     res.message = "invalid model: " + problems.front();
     return res;
   }
+
+  const bool qp = has_quadratic(model);
+  res.quadratic = qp;
+  LpMethod method = options_.method;
+  if (method == LpMethod::Auto) method = qp ? LpMethod::Ipm : LpMethod::Simplex;
+  if (qp && method == LpMethod::Simplex) {
+    res.status = Status::NotImplemented;
+    res.message = "the simplex method cannot solve a quadratic program; use --method ipm (or auto)";
+    return res;
+  }
+  if (qp) {
+    const ConvexityReport cr = check_convexity(model);
+    if (!cr.decided) {
+      res.status = Status::NumericalError;
+      res.message = "convexity of the quadratic term could not be decided: " + cr.note;
+      return res;
+    }
+    if (!cr.convex) {
+      res.status = Status::NonConvex;
+      res.message = "the quadratic term is not positive semidefinite in the minimization form (" + cr.note + ")";
+      return res;
+    }
+  }
+  if (method == LpMethod::Ipm) return solve_with_ipm(model, t_start);
 
   struct Config {
     bool presolve, scaling;
@@ -333,11 +469,124 @@ LpResult LpSolver::solve(const LpModel& model) const {
     res.status = Status::NumericalError;
   }
   res.attempts = tried;
+  res.method_used = "dual simplex";
   if (!res.farkas_ray.empty() || !res.unbounded_ray.empty() || res.status == Status::Optimal) {
     // certified: nothing to add
   } else if (res.status == Status::NumericalError) {
     if (message.empty()) message = "no attempt produced a verified result";
   }
+  res.message = message;
+  res.total_seconds = seconds_since(t_start);
+  return res;
+}
+
+LpResult LpSolver::solve_with_ipm(const LpModel& model, std::chrono::steady_clock::time_point t_start) const {
+  LpResult res;
+  const bool qp = has_quadratic(model);
+  res.quadratic = qp;
+  res.method_used = "interior point";
+  struct Config {
+    bool presolve, scaling;
+    double tight;
+  };
+  // The fallback ladder: the configuration as asked, then without presolve, then with a hundred times tighter tolerance,
+  // then without scaling.
+  std::vector<Config> ladder;
+  ladder.push_back({options_.presolve, options_.scaling, 1.0});
+  if (options_.presolve) ladder.push_back({false, options_.scaling, 1.0});
+  ladder.push_back({false, options_.scaling, 0.01});
+  if (options_.scaling) ladder.push_back({false, false, 0.01});
+  std::string message;
+  int tried = 0;
+  res.status = Status::NumericalError;
+  // The constraints of a QP alone are an LP feasibility problem: the dual simplex settles it with a Farkas certificate.
+  auto check_constraints_with_simplex = [&](bool diverged) {
+    LpModel feas = model;
+    feas.quadratic = SparseMatrix();
+    std::fill(feas.col_cost.begin(), feas.col_cost.end(), 0.0);
+    feas.objective_offset = 0.0;
+    feas.sense = Sense::Minimize;
+    LpOptions so = options_;
+    so.method = LpMethod::Simplex;
+    const LpResult fr = LpSolver(so).solve(feas);
+    if (fr.status == Status::Infeasible && !fr.farkas_ray.empty()) {
+      res.status = Status::Infeasible;
+      res.farkas_ray = fr.farkas_ray;
+      message += (message.empty() ? "" : "; ") + std::string("the constraints are infeasible (Farkas multipliers verified)");
+    } else if (diverged) {
+      res.status = Status::InfeasibleOrUnbounded;
+      message += (message.empty() ? "" : "; ") + std::string("the interior-point iterates diverged and the constraints are feasible: the QP is infeasible or unbounded (no certificate)");
+    }
+  };
+  for (std::size_t k = 0; k < ladder.size(); ++k) {
+    const double elapsed = seconds_since(t_start);
+    if (!is_inf(options_.params.time_limit) && elapsed >= options_.params.time_limit && k > 0) {
+      res.status = Status::TimeLimit;
+      break;
+    }
+    IpmAttempt at = run_ipm_attempt(model, options_, ladder[k].presolve, ladder[k].scaling, ladder[k].tight, options_.params.time_limit - elapsed);
+    const Attempt& a = at.a;
+    ++tried;
+    res.iterations += a.iterations;
+    res.presolve_seconds += a.t_presolve;
+    res.scaling_seconds += a.t_scaling;
+    res.simplex_seconds += a.t_simplex;
+    if (a.presolve_ran && !res.presolve_ran) {
+      res.presolve_ran = true;
+      res.presolve_stats = a.pstats;
+    }
+    if (!a.note.empty() && res.presolve_status_note.empty()) res.presolve_status_note = a.note;
+    if (!a.message.empty()) message += (message.empty() ? "" : "; ") + a.message;
+    res.ipm_nnz_l = at.ipm.nnz_l;
+    res.ipm_regularizations += at.ipm.dynamic_regularizations;
+    res.ipm_refinement_steps += at.ipm.refinement_steps;
+    res.ipm_factorizations += at.ipm.factorizations;
+    res.ipm_primal_residual = at.ipm.primal_residual;
+    res.ipm_dual_residual = at.ipm.dual_residual;
+    res.ipm_gap = at.ipm.gap;
+    res.ipm_history = at.ipm.history;
+    if (a.verified && a.status == Status::Optimal) {
+      res.status = Status::Optimal;
+      res.solution = a.solution;
+      res.kkt = a.kkt;
+      res.dual_bound = a.bound;
+      res.rigorous = a.bound.rigorous;
+      res.configuration = std::string(ladder[k].presolve ? "presolve" : "") + (ladder[k].presolve && ladder[k].scaling ? "+" : "") +
+                          (ladder[k].scaling ? "scaling" : (ladder[k].presolve ? "" : "none")) + (ladder[k].tight < 1.0 ? "+tight" : "");
+      break;
+    }
+    if (a.status == Status::TimeLimit || a.status == Status::IterationLimit) {
+      res.status = a.status;
+      break;
+    }
+    const bool divergence = a.status == Status::InfeasibleOrUnbounded && !a.needs_confirm;
+    if (divergence) {
+      // The interior-point method has no certificates. An LP is resolved by the dual simplex (which has them); a QP gets a
+      // feasibility check of its constraints with the dual simplex.
+      res.attempts = tried;
+      if (!qp) {
+        LpOptions so = options_;
+        so.method = LpMethod::Simplex;
+        LpResult sr = LpSolver(so).solve(model);
+        sr.iterations += res.iterations;
+        sr.attempts += tried;
+        sr.method_used = "dual simplex (after the interior-point method diverged)";
+        sr.message = "the interior-point iterates diverged; resolved by the dual simplex" + (sr.message.empty() ? std::string() : "; " + sr.message);
+        return sr;
+      }
+      check_constraints_with_simplex(true);
+      res.message = message;
+      res.total_seconds = seconds_since(t_start);
+      return res;
+    }
+    if (options_.log != nullptr && k + 1 < ladder.size()) {
+      *options_.log << "note: interior-point attempt " << (k + 1) << " gave " << to_string(a.status) << "; trying a fallback\n";
+    }
+    res.status = Status::NumericalError;
+  }
+  res.attempts = tried;
+  if (res.status == Status::NumericalError && qp) check_constraints_with_simplex(false);  // an infeasible QP may only make the IPM fail
+  if (res.status == Status::NumericalError && message.empty()) message = "no attempt produced a verified result";
   res.message = message;
   res.total_seconds = seconds_since(t_start);
   return res;

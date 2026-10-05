@@ -49,8 +49,8 @@ class EmptyColumnRecord final : public PostsolveRecord {
 /// A column substituted out at `value`: d_j = c_j - A_j^T y.
 class FixedColumnRecord : public PostsolveRecord {
  public:
-  FixedColumnRecord(int col, double value, double cost, Entries entries)
-      : col_(col), value_(value), cost_(cost), entries_(std::move(entries)) {}
+  FixedColumnRecord(int col, double value, double cost, Entries entries, Entries qentries = {}, double qdiag = 0.0)
+      : col_(col), value_(value), cost_(cost), entries_(std::move(entries)), qentries_(std::move(qentries)), qdiag_(qdiag) {}
   void undo(PostsolveState& s) const override;
 
  private:
@@ -58,6 +58,8 @@ class FixedColumnRecord : public PostsolveRecord {
   double value_;
   double cost_;
   Entries entries_;  // (row, coefficient) of the alive entries when it was removed
+  Entries qentries_;  // (column, q_jk) of the alive quadratic neighbours when it was removed (QP only)
+  double qdiag_;      // q_jj
 };
 
 /// A column fixed by the dual-fixing argument (same recovery as a fixed column).

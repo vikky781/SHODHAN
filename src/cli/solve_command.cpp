@@ -34,7 +34,8 @@ int usage_error(const std::string& message) {
                "                     MILP: [--mip-gap g] [--mip-abs-gap g] [--node-limit n] [--seed s]\n"
                "                           [--branching reliability|pseudocost|mostfrac|first]\n"
                "                           [--node-select bestbound|depth|bestestimate] [--heuristics on|off]\n"
-               "                           [--presolve on|off] [--probing on|off] [--cuts on|off] [--cut-rounds n]\n";
+               "                           [--presolve on|off] [--probing on|off] [--cuts on|off] [--cut-rounds n]\n"
+               "                     LP/QP: [--method auto|simplex|ipm|ipm-crossover] [--ipm-tol t]\n";
   return kExitUsage;
 }
 
@@ -139,6 +140,14 @@ int run_solve(const std::vector<std::string>& args) {
       }
       mopt.cut_rounds = static_cast<int>(v);
       ++i;
+    } else if (a == "--method") {
+      if (i + 1 >= args.size()) return usage_error("--method needs auto, simplex, ipm or ipm-crossover");
+      if (!parse_method(args[++i], &opt.method)) return usage_error("unknown method '" + args[i] + "' (auto, simplex, ipm, ipm-crossover)");
+    } else if (a == "--ipm-tol") {
+      double v = 0.0;
+      if (i + 1 >= args.size() || !parse_number(args[i + 1], &v) || !(v > 0.0)) return usage_error("--ipm-tol needs a positive number");
+      opt.ipm_tol = v;
+      ++i;
     } else if (a == "--write-cert") {
       if (i + 1 >= args.size()) return usage_error("--write-cert needs a file name");
       cert_path = args[++i];
@@ -165,8 +174,8 @@ int run_solve(const std::vector<std::string>& args) {
   print_model_summary(model, read.warnings, std::cout);
   std::cout << "\n";
 
-  if (model.quadratic.nnz() > 0) {
-    std::cout << "Status: " << to_string(Status::NotImplemented) << " (quadratic objectives are not implemented yet, no solution is produced)\n";
+  if (model.quadratic.nnz() > 0 && has_integer_columns(model)) {
+    std::cout << "Status: " << to_string(Status::NotImplemented) << " (MIQP planned, not implemented: integer columns together with a quadratic term)\n";
     if (!cert_path.empty()) {
       LpResult none;  // no certificate exists for an unsolved model: write the honest "other" one
       none.status = Status::NotImplemented;
@@ -196,9 +205,16 @@ int run_solve(const std::vector<std::string>& args) {
   if (r.status == Status::Optimal) {
     std::cout << "Objective:     " << num(r.solution.objective) << "\n";
   }
-  std::cout << "Iterations:    " << r.iterations << " (dual phase 1: " << r.phase1_iterations << ", primal cleanup: " << r.primal_iterations
-            << "), refactorizations: " << r.refactors << "\n";
-  std::cout << "Perturbation:  " << (r.perturbation_used ? "used" : "not used") << "\n";
+  if (!r.method_used.empty()) std::cout << "Method:        " << (r.method_used.empty() ? "dual simplex" : r.method_used) << (r.quadratic ? " (quadratic objective)" : "") << "\n";
+  if (r.method_used.rfind("interior point", 0) == 0) {
+    std::cout << "Iterations:    " << r.iterations << " interior-point iterations, " << r.ipm_factorizations << " factorizations in the last run, nnz(L) " << r.ipm_nnz_l
+              << ", " << r.ipm_regularizations << " dynamic regularizations, " << r.ipm_refinement_steps << " refinement steps\n";
+    std::cout << "Final residuals (relative, scaled problem): primal " << sci(r.ipm_primal_residual) << ", dual " << sci(r.ipm_dual_residual) << ", gap " << sci(r.ipm_gap) << "\n";
+  } else {
+    std::cout << "Iterations:    " << r.iterations << " (dual phase 1: " << r.phase1_iterations << ", primal cleanup: " << r.primal_iterations
+              << "), refactorizations: " << r.refactors << "\n";
+    std::cout << "Perturbation:  " << (r.perturbation_used ? "used" : "not used") << "\n";
+  }
   if (r.presolve_ran) {
     std::cout << "Presolve:      rows " << r.presolve_stats.rows_before << " -> " << r.presolve_stats.rows_after << ", columns "
               << r.presolve_stats.cols_before << " -> " << r.presolve_stats.cols_after;
@@ -210,7 +226,7 @@ int run_solve(const std::vector<std::string>& args) {
   std::cout << "Scaling:       " << (opt.scaling ? "on" : "off") << "\n";
   {
     char buf[160];
-    std::snprintf(buf, sizeof(buf), "Time:          %.3f s (presolve %.3f, scaling %.3f, simplex %.3f)\n", r.total_seconds, r.presolve_seconds,
+    std::snprintf(buf, sizeof(buf), "Time:          %.3f s (presolve %.3f, scaling %.3f, solve %.3f)\n", r.total_seconds, r.presolve_seconds,
                   r.scaling_seconds, r.simplex_seconds);
     std::cout << buf;
   }
@@ -257,6 +273,7 @@ int run_solve(const std::vector<std::string>& args) {
   if (!cert_path.empty() && !write_certificate_output(model, path, opt, r, cert_path)) return kExitUsage;
   if (r.status == Status::Optimal) return kExitOk;
   // A run stopped at a limit (time or iterations) exits 4, like a MILP stopped at its time or node limit.
+  if (r.status == Status::NotImplemented) return kExitNotImplemented;
   return r.status == Status::TimeLimit || r.status == Status::IterationLimit ? kExitLimit : kExitStatus;
 }
 

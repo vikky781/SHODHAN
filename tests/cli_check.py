@@ -187,6 +187,28 @@ def main():
     rc, out, _ = run(exe, "solve", mip)
     check("solve on a MILP solves it: Optimal, objective 0.2, a best bound, exit 0",
           rc == 0 and "Status:        Optimal" in out and "Objective:     0.2" in out and "Best bound:" in out and "Nodes:" in out, repr((rc, out[-300:])))
+    # ---- quadratic programs ----
+    qp = os.path.join(models, "tiny_qp.qps")
+    rc, out, _ = run(exe, "solve", qp)
+    check("solve on a convex QP uses the interior-point method: Optimal, objective 1.5, KKT passed, exit 0",
+          rc == 0 and "Status:        Optimal" in out and "Objective:     1.5" in out and "interior point" in out and "KKT check" in out and "passed" in out, repr((rc, out[-400:])))
+    rc, out, _ = run(exe, "solve", qp, "--method", "ipm", "--ipm-tol", "1e-10")
+    check("solve --method ipm --ipm-tol 1e-10 on a QP gives objective 1.5", rc == 0 and "Objective:     1.5" in out, repr((rc, out[-300:])))
+    rc, out, _ = run(exe, "solve", qp, "--method", "simplex")
+    check("solve --method simplex on a QP is rejected with a clear message (NotImplemented, exit 2)",
+          rc == 2 and "NotImplemented" in out and "cannot solve a quadratic program" in out, repr((rc, out[-300:])))
+    rc, out, _ = run(exe, "solve", os.path.join(models, "tiny_nonconvex.qps"))
+    check("solve on an indefinite QP reports NonConvex with exit 3", rc == 3 and "Status:        NonConvex" in out and "not positive semidefinite" in out, repr((rc, out[-300:])))
+    rc, out, _ = run(exe, "solve", os.path.join(models, "tiny_miqp.qps"))
+    check("solve on a QP with integer columns reports NotImplemented (MIQP planned) with exit 2", rc == 2 and "NotImplemented" in out and "MIQP" in out, repr((rc, out[-300:])))
+    rc, out, _ = run(exe, "info", qp)
+    check("info shows the quadratic term and its convexity", rc == 0 and "Quadratic term: 2 nonzeros" in out and "positive semidefinite" in out, repr((rc, out[-300:])))
+    rc, out, _ = run(exe, "dump-model", qp)
+    check("dump-model lists the quadratic entries", rc == 0 and "qnnz\t2" in out and "quad\tX1\tX1\t1" in out, repr((rc, out[-200:])))
+    rc, _, err = run(exe, "solve", qp, "--method", "barrier")
+    check("solve --method barrier is a usage error (1)", rc == 1, err)
+    rc, _, err = run(exe, "solve", qp, "--ipm-tol", "0")
+    check("solve --ipm-tol 0 is a usage error (1)", rc == 1, err)
     gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bench", "gen_mip.py")
     with tempfile.TemporaryDirectory() as md:
         knap = os.path.join(md, "knap.mps")

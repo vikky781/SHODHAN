@@ -220,17 +220,14 @@ bool SparseLdl::factorize(const SparseMatrix& lower) {
   const Index n = n_;
   // Load the new values into the permuted copy and keep them for the residuals.
   k_.value = lower.value;
-  double scale = 0.0;
   for (std::size_t p = 0; p < nnz_; ++p) {
     const Index m = map_[p];
     if (m >= 0) {
       ux_[u(m)] = lower.value[p];
     } else {
       diag_[u(-1 - m)] = lower.value[p];
-      scale = std::max(scale, std::fabs(lower.value[p]));
     }
   }
-  if (scale == 0.0) scale = 1.0;
   stats_.dynamic_regularizations = 0;
   stats_.min_pivot = kInf;
   stats_.min_pivot_column = -1;
@@ -274,8 +271,8 @@ bool SparseLdl::factorize(const SparseMatrix& lower) {
       stats_.min_pivot = s * dk;
       stats_.min_pivot_column = sym_.perm[u(k)];
     }
-    if (s * dk < params_.pivot_tol * scale) {
-      dk = s * params_.dynamic_delta * scale;
+    if (s * dk < params_.pivot_tol) {
+      dk = s * params_.dynamic_delta;
       ++stats_.dynamic_regularizations;
     }
     d_[u(k)] = dk;
@@ -302,33 +299,31 @@ void SparseLdl::solve_factors(std::span<double> y) const {
   }
 }
 
-// r = b - K x with K symmetric from its lower triangle; returns ||r||_inf / (||b||_inf + ||K||_inf ||x||_inf).
+// r = b - K x with K symmetric from its lower triangle; returns the componentwise (Oettli-Prager) backward error
+// max_i |r_i| / (|b_i| + sum_j |K_ij x_j|), which is not blinded by rows with huge entries.
 double SparseLdl::residual(std::span<const double> b, std::span<const double> x, std::vector<double>& r) const {
   const Index n = n_;
   for (Index i = 0; i < n; ++i) r[u(i)] = b[u(i)];
   std::vector<double>& rowabs = w_;
-  std::fill(rowabs.begin(), rowabs.end(), 0.0);
+  for (Index i = 0; i < n; ++i) rowabs[u(i)] = std::fabs(b[u(i)]);
   for (Index j = 0; j < n; ++j) {
     for (Index p = k_.col_start[u(j)]; p < k_.col_start[u(j) + 1]; ++p) {
       const Index i = k_.row_index[u(p)];
       const double v = k_.value[u(p)];
       r[u(i)] -= v * x[u(j)];
-      rowabs[u(i)] += std::fabs(v);
+      rowabs[u(i)] += std::fabs(v * x[u(j)]);
       if (i != j) {
         r[u(j)] -= v * x[u(i)];
-        rowabs[u(j)] += std::fabs(v);
+        rowabs[u(j)] += std::fabs(v * x[u(i)]);
       }
     }
   }
-  double rn = 0.0, bn = 0.0, kn = 0.0, xn = 0.0;
+  double err = 0.0;
   for (Index i = 0; i < n; ++i) {
-    rn = std::max(rn, std::fabs(r[u(i)]));
-    bn = std::max(bn, std::fabs(b[u(i)]));
-    kn = std::max(kn, rowabs[u(i)]);
-    xn = std::max(xn, std::fabs(x[u(i)]));
+    if (r[u(i)] == 0.0) continue;
+    err = std::max(err, rowabs[u(i)] > 0.0 ? std::fabs(r[u(i)]) / rowabs[u(i)] : 1.0);
   }
-  const double den = bn + kn * xn;
-  return den > 0.0 ? rn / den : rn;
+  return err;
 }
 
 void SparseLdl::solve(std::span<const double> b, std::span<double> x, int max_refinement, double tol) {

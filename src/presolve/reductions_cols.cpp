@@ -67,10 +67,18 @@ bool EmptyColumnReduction::apply(Context& c, int j) {
 void FixedColumnReduction::fix(Context& c, int j, double value, bool dual_fixing) {
   WorkModel& w = c.w;
   Entries entries = w.col_snapshot(j);
+  Entries qentries;
+  double qdiag = 0.0;
+  if (w.has_q) {
+    for (const Entry& e : w.qcols[u(j)]) {
+      if (e.idx == j) qdiag = e.val;
+      else if (w.col_alive[u(e.idx)]) qentries.emplace_back(e.idx, e.val);
+    }
+  }
   if (dual_fixing) {
-    c.record(std::make_shared<DualFixingRecord>(j, value, w.cost[u(j)], std::move(entries)));
+    c.record(std::make_shared<DualFixingRecord>(j, value, w.cost[u(j)], std::move(entries), std::move(qentries), qdiag));
   } else {
-    c.record(std::make_shared<FixedColumnRecord>(j, value, w.cost[u(j)], std::move(entries)));
+    c.record(std::make_shared<FixedColumnRecord>(j, value, w.cost[u(j)], std::move(entries), std::move(qentries), qdiag));
   }
   w.substitute_fixed(j, value);
 }

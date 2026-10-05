@@ -59,9 +59,10 @@ struct LdlParams {
   /// rows with sign -1 (the negative definite block): the static regularization, applied in the factorization only.
   double rho = 1e-9;
   double delta = 1e-9;
-  /// Dynamic regularization: a pivot d_k whose sign-adjusted value sign_k * d_k is below pivot_tol * scale is replaced
-  /// by sign_k * dynamic_delta * scale, where scale is the largest absolute diagonal entry; each replacement is counted.
-  double pivot_tol = 1e-14;
+  /// Dynamic regularization: a pivot d_k whose sign-adjusted value sign_k * d_k is below pivot_tol (an ABSOLUTE
+  /// threshold: the diagonal of an interior-point matrix spans many orders of magnitude, so a threshold relative to its
+  /// largest entry would replace healthy pivots) is replaced by sign_k * dynamic_delta; each replacement is counted.
+  double pivot_tol = 1e-13;
   double dynamic_delta = 1e-8;
 };
 
@@ -73,7 +74,7 @@ struct LdlStats {
   double min_pivot = 0.0;                 ///< smallest sign-adjusted pivot of the last factorization, before any replacement
   Index min_pivot_column = -1;            ///< the column of the ORIGINAL matrix that pivot belongs to
   int refinement_steps = 0;               ///< steps taken by the last solve
-  double residual = 0.0;                  ///< relative residual of the last solve against the unregularized matrix
+  double residual = 0.0;                  ///< componentwise backward error of the last solve against the unregularized matrix
   long long factorizations = 0;
 };
 

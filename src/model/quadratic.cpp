@@ -115,7 +115,7 @@ ConvexityReport sparse_convexity(const LpModel& m, double sgn, double rel_tol) {
   LdlParams params;
   params.rho = params.delta = 0.0;
   params.pivot_tol = 1e-13;
-  params.dynamic_delta = 1e-8;
+  params.dynamic_delta = 1e-8;  // absolute values: see LdlParams
   SparseLdl ldl(params);
   if (!ldl.analyze(q, std::vector<signed char>(to_size(n), 1), SparseLdl::Ordering::Amd) || !ldl.factorize(q)) {
     rep.decided = false;

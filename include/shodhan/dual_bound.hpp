@@ -12,7 +12,9 @@ namespace shodhan {
 ///   LB(y) = offset + sum_i (y_i > 0 ? y_i row_lower_i : y_i row_upper_i)
 ///                  + sum_j (d_j > 0 ? d_j col_lower_j : d_j col_upper_j),     d = c - A^T y,
 ///
-/// a lower bound on the objective of every feasible point; for a maximization model it is reported as an
+/// a lower bound on the objective of every feasible point; with a convex quadratic term the bound is
+///   LB(y; x~) = offset + sum_i ... + sum_j (d_j > 0 ? d_j col_lower_j : d_j col_upper_j) - (1/2) x~^T Q x~,   d = c + Q x~ - A^T y,
+/// for the supplied point x~ (first-order underestimate of the convex quadratic form, docs/QP.md); for a maximization model it is reported as an
 /// upper bound in the model's sense. This is the same bound KASAUTI computes (docs/CERTIFICATES.md), with
 /// the same two-pass rule: first strictly (a value that needs an infinite bound makes the bound -infinity),
 /// then, only if that fails, treating a value below `zero_tol` of its scale as zero.

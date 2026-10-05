@@ -53,13 +53,32 @@ DualBound compute_dual_bound(const LpModel& m, const std::vector<double>& x, con
   }
   const Real sgn = m.sense == Sense::Maximize ? -1.0L : 1.0L;
 
-  // d = c - A^T y per column with its scale and rounding margin; row activities for the drop effect.
+  // Quadratic term (convex Q, minimization form Q' = sgn Q): for ANY x~ the first-order underestimate
+  // (1/2) x^T Q' x >= x~^T Q' x - (1/2) x~^T Q' x~ gives the bound with d = c + Q' x~ - A^T y and the constant
+  // -(1/2) x~^T Q' x~; x~ is the supplied point. The bound is only valid when Q' is positive semidefinite, which the
+  // caller establishes (check_convexity, or the exact test in KASAUTI).
+  std::vector<Real> qx(cols, 0.0);
+  Real quad_half = 0.0;
+  if (m.quadratic.nnz() > 0 && m.quadratic.n_cols == m.n_cols) {
+    for (std::size_t j = 0; j < cols; ++j) {
+      for (Index p = m.quadratic.col_start[j]; p < m.quadratic.col_start[j + 1]; ++p) {
+        const std::size_t i = static_cast<std::size_t>(m.quadratic.row_index[to_size(p)]);
+        const Real q = sgn * static_cast<Real>(m.quadratic.value[to_size(p)]);
+        qx[i] += q * x[j];
+        if (i != j) qx[j] += q * x[i];
+      }
+    }
+    for (std::size_t j = 0; j < cols; ++j) quad_half += 0.5L * x[j] * qx[j];
+  }
+
+  // d = c + Q x~ - A^T y per column with its scale and rounding margin; row activities for the drop effect.
   std::vector<Real> d(cols), scale(cols), margin(cols);
   for (std::size_t j = 0; j < cols; ++j) {
     Sum s;
     const Real c = sgn * m.col_cost[j];
     s.add(c);
-    Real sc = std::fabs(c);
+    s.add(qx[j]);
+    Real sc = std::fabs(c) + std::fabs(qx[j]);
     for (Index p = m.A.col_start[j]; p < m.A.col_start[j + 1]; ++p) {
       const Real a = m.A.value[to_size(p)], yv = y[to_size(m.A.row_index[to_size(p)])];
       s.add_product(-a, yv);
@@ -79,8 +98,9 @@ DualBound compute_dual_bound(const LpModel& m, const std::vector<double>& x, con
   auto run = [&](double drop) {
     Pass p;
     Sum lb;
-    Real terms_abs = std::fabs(m.objective_offset);
+    Real terms_abs = std::fabs(m.objective_offset) + std::fabs(quad_half);
     lb.add(sgn * m.objective_offset);
+    lb.add(-quad_half);
     int offenders = 0;
     Real worst_rel = 0.0;
     auto offender = [&](Real mag, Real rel) {

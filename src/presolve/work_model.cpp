@@ -32,6 +32,19 @@ WorkModel::WorkModel(const LpModel& model) {
   offset = sgn * model.objective_offset;
   is_int.resize(u(n));
   for (int j = 0; j < n; ++j) is_int[u(j)] = model.col_type[u(j)] != ColType::Continuous ? 1 : 0;
+  qcols.assign(u(n), {});
+  if (model.quadratic.nnz() > 0) {
+    has_q = true;
+    for (int j = 0; j < n; ++j) {
+      for (Index p = model.quadratic.col_start[u(j)]; p < model.quadratic.col_start[u(j) + 1]; ++p) {
+        const int i = model.quadratic.row_index[to_size(p)];
+        const double v = sgn * model.quadratic.value[to_size(p)];
+        if (v == 0.0) continue;
+        qcols[u(j)].push_back({i, v});
+        if (i != j) qcols[u(i)].push_back({j, v});
+      }
+    }
+  }
   row_alive.assign(u(m), 1);
   col_alive.assign(u(n), 1);
   row_dirty.assign(u(m), 1);
@@ -105,6 +118,13 @@ void WorkModel::substitute_fixed(int j, double v) {
     row_mag[u(i)] = std::max(row_mag[u(i)], std::fabs(a * v));
   });
   offset += cost[u(j)] * v;
+  if (has_q) {
+    // Fixing x_j = v turns q_jk x_j x_k into the linear term q_jk v x_k and (1/2) q_jj x_j^2 into a constant.
+    for (const Entry& e : qcols[u(j)]) {
+      if (e.idx == j) offset += 0.5 * e.val * v * v;
+      else if (col_alive[u(e.idx)]) cost[u(e.idx)] += e.val * v;
+    }
+  }
   remove_col(j);
 }
 

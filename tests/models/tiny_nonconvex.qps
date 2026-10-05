@@ -1,0 +1,17 @@
+NAME          NONCONVEX
+ROWS
+ N  OBJ
+ L  R1
+COLUMNS
+    X1        OBJ                 -1   R1                   1
+    X2        OBJ                 -1   R1                   1
+RHS
+    RHS       R1                   4
+BOUNDS
+ UP BND       X1                   3
+ UP BND       X2                   3
+QUADOBJ
+    X1        X1                   1
+    X2        X1                   2
+    X2        X2                   1
+ENDATA

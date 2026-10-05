@@ -142,6 +142,23 @@ void build_reduced(const LpModel& original, WorkModel& w, PresolveResult* res) {
     if (t == ColType::Binary && (w.cl[u(j)] != 0.0 || w.cu[u(j)] != 1.0)) t = ColType::Integer;
     r.col_type.push_back(t);
   }
+  if (w.has_q) {
+    std::vector<int> col_of(u(w.n), -1);
+    for (std::size_t k = 0; k < st.col_map.size(); ++k) col_of[u(st.col_map[k])] = static_cast<int>(k);
+    std::vector<Triplet> qt;
+    for (const Index oj : st.col_map) {
+      for (const presolve_detail::Entry& e : w.qcols[u(oj)]) {
+        if (!w.col_alive[u(e.idx)] || e.idx < oj) continue;  // the lower triangle: row (new) >= column (new)
+        if (e.val != 0.0) qt.push_back({col_of[u(e.idx)], col_of[u(oj)], e.val});
+      }
+    }
+    if (!qt.empty()) {
+      std::string qerr;
+      if (!SparseMatrix::from_triplets(static_cast<Index>(st.col_map.size()), static_cast<Index>(st.col_map.size()), std::move(qt), &r.quadratic, &qerr)) {
+        throw std::logic_error("presolve: internal error building the reduced quadratic term: " + qerr);
+      }
+    }
+  }
   for (const Index oi : st.row_map) {
     r.row_lower.push_back(w.rl[u(oi)]);
     r.row_upper.push_back(w.ru[u(oi)]);
@@ -177,8 +194,22 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
   st.original_offset = model.objective_offset;
   st.compute_duals = options.need_duals && !options.is_mip;
 
+  // A quadratic term restricts the reductions to those that are valid whatever Q is: empty rows, singleton rows,
+  // fixed columns (with the update of c and the offset by Q) and redundant rows. Dual fixing, empty-column fixing by the
+  // sign of the cost, doubleton aggregation, forcing rows and every MIP reduction either use the sign of a cost or rely
+  // on a linear objective (docs/QP.md).
+  PresolveOptions restricted = options;
+  if (model.quadratic.nnz() > 0) {
+    restricted.dual_fixing = false;
+    restricted.empty_columns = false;
+    restricted.doubleton_equations = false;
+    restricted.forcing_rows = false;
+    restricted.is_mip = false;
+    restricted.integer_bounds = false;
+  }
+  const PresolveOptions& active_options = restricted;
   WorkModel w(model);
-  Context ctx{w, options, st, stats};
+  Context ctx{w, active_options, st, stats};
 
   auto finish = [&](PresolveStatus status) {
     res.status = status;
@@ -188,7 +219,7 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
 
   // The standard passes, to a fixpoint (or max_passes). False when infeasibility was found.
   auto run_standard = [&]() {
-    for (int pass = 0; pass < options.max_passes && w.any_dirty(); ++pass) {
+    for (int pass = 0; pass < active_options.max_passes && w.any_dirty(); ++pass) {
       ++stats.passes;
       w.compact();
       for (int j = 0; j < w.n && !ctx.infeasible; ++j) {
@@ -213,8 +244,8 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
 
   if (!run_standard()) return infeasible_result();
   presolve_detail::MipWork mip_work;
-  if (options.is_mip && !ctx.unbounded) {
-    for (int round = 0; round < options.mip_rounds; ++round) {
+  if (active_options.is_mip && !ctx.unbounded) {
+    for (int round = 0; round < active_options.mip_rounds; ++round) {
       const bool changed = presolve_detail::run_mip_round(ctx, mip_work);
       if (ctx.infeasible) return infeasible_result();
       if (!changed) break;
@@ -222,7 +253,7 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
     }
   }
   MipPresolveInfo structure;
-  if (options.is_mip && !ctx.unbounded) structure = presolve_detail::collect_mip_structure(ctx, mip_work);
+  if (active_options.is_mip && !ctx.unbounded) structure = presolve_detail::collect_mip_structure(ctx, mip_work);
 
   const bool all_gone = w.alive_rows() == 0 && w.alive_cols() == 0;
   if (ctx.unbounded) {
@@ -230,7 +261,7 @@ PresolveResult presolve(const LpModel& model, const PresolveOptions& options) {
     return finish(all_gone ? PresolveStatus::Unbounded : PresolveStatus::InfeasibleOrUnbounded);
   }
   build_reduced(model, w, &res);
-  if (options.is_mip) {
+  if (active_options.is_mip) {
     std::vector<int> col_new(u(w.n), -1);
     for (std::size_t k = 0; k < st.col_map.size(); ++k) col_new[u(st.col_map[k])] = static_cast<int>(k);
     for (Implication im : structure.implications) {

@@ -1,10 +1,12 @@
 #pragma once
 
+#include <chrono>
 #include <iosfwd>
 #include <string>
 #include <vector>
 
 #include "shodhan/dual_bound.hpp"
+#include "shodhan/ipm.hpp"
 #include "shodhan/kkt.hpp"
 #include "shodhan/lp_model.hpp"
 #include "shodhan/params.hpp"
@@ -14,12 +16,23 @@
 
 namespace shodhan {
 
+/// Which algorithm solves the continuous problem. Auto: the dual simplex for an LP, the interior-point method for a QP.
+/// The simplex cannot solve a QP (NotImplemented with an explanation).
+enum class LpMethod { Auto, Simplex, Ipm, IpmCrossover };
+
+const char* to_string(LpMethod method) noexcept;
+bool parse_method(const std::string& name, LpMethod* out);
+
 struct LpOptions {
   /// Tolerances (primal_tol, dual_tol), time limit, seed and verbosity.
   Params params;
   bool presolve = true;
   bool scaling = true;
   bool perturb = true;
+  LpMethod method = LpMethod::Auto;
+  /// Convergence tolerance of the interior-point method on the scaled problem (default 1e-8, a target).
+  double ipm_tol = 1e-9;
+  int ipm_max_iterations = 200;
   long long iteration_limit = 100000000;
   /// Tolerance of the final KKT check on the ORIGINAL model.
   double kkt_tol = 1e-6;
@@ -48,6 +61,18 @@ struct LpResult {
   int refactors = 0;
   bool perturbation_used = false;
   int attempts = 1;  ///< 1 unless a fallback was needed (see message)
+  /// The algorithm that produced the result: "dual simplex", "interior point", "interior point + crossover".
+  std::string method_used;
+  bool quadratic = false;  ///< the model has a quadratic term
+  /// Interior-point statistics of the accepted (or last) run; `iterations` above counts its iterations.
+  long long ipm_nnz_l = 0;
+  long long ipm_regularizations = 0;
+  long long ipm_refinement_steps = 0;
+  int ipm_factorizations = 0;
+  double ipm_primal_residual = 0.0, ipm_dual_residual = 0.0, ipm_gap = 0.0;
+  std::vector<IpmIteration> ipm_history;
+  /// Crossover (IpmCrossover): simplex iterations spent after the interior-point solution.
+  long long crossover_iterations = 0;
 
   double presolve_seconds = 0.0;
   double scaling_seconds = 0.0;
@@ -85,6 +110,8 @@ class LpSolver {
   const LpOptions& options() const { return options_; }
 
  private:
+  LpResult solve_with_ipm(const LpModel& model, std::chrono::steady_clock::time_point t_start) const;
+
   LpOptions options_;
 };
 

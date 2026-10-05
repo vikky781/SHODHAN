@@ -1,0 +1,13 @@
+NAME          TINYQP
+ROWS
+ N  OBJ
+ L  R1
+COLUMNS
+    X1        OBJ                 -1   R1                   1
+    X2        OBJ                 -2   R1                   1
+RHS
+    RHS       OBJ                 -3   R1                   1
+QUADOBJ
+    X1        X1                   1
+    X2        X2                   1
+ENDATA
